@@ -86,6 +86,18 @@
   .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#222c;backdrop-filter:blur(6px);color:#fff;
          padding:10px 18px;border-radius:999px;font-size:13px;z-index:50;opacity:0;transition:opacity .3s;pointer-events:none;max-width:88%}
   .toast.show{opacity:1}
+  /* auth */
+  #authOverlay{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
+  #authOverlay.hidden{display:none}
+  .auth-box{width:100%;max-width:360px}
+  .auth-box .logo{text-align:center;font-size:44px;margin-bottom:6px}
+  .auth-box h2{text-align:center;font-size:18px;margin-bottom:4px}
+  .auth-box .sub2{text-align:center;font-size:12px;color:var(--muted);margin-bottom:18px}
+  .auth-box input,.auth-box select{margin-bottom:10px}
+  .auth-box select{width:100%;border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:14px;background:#fafafa;font-family:inherit}
+  .auth-link{display:block;text-align:center;margin-top:14px;font-size:13px;color:var(--accent);background:none;width:100%}
+  .auth-err{color:var(--danger);font-size:12.5px;text-align:center;margin-top:10px;min-height:16px}
+  .auth-note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:16px;text-align:center}
 </style>
 </head>
 <body>
@@ -138,6 +150,11 @@
 
 <!-- ════════ 设置 ════════ -->
 <section class="view" id="view-settings">
+  <div class="card"><h2>👤 账号 <span id="acctName" style="font-size:13px;color:var(--muted)"></span></h2>
+    <button class="btn-ghost btn-sm" id="logoutBtn">退出登录</button>
+    <button class="btn-ghost btn-sm" id="chpwdBtn">修改密码</button>
+    <div class="hint">数据用你的密码 AES-256 加密存在本机，退出后需重新登录解密。密码无法找回，请牢记。</div>
+  </div>
   <div class="card"><h2>🔑 Claude API Key</h2>
     <input type="password" id="apiKeyInput" placeholder="sk-ant-...">
     <button class="btn-ghost btn-sm" id="saveKeyBtn" style="margin-top:8px">保存</button>
@@ -169,6 +186,34 @@
 </nav>
 <div class="toast" id="toast"></div>
 
+<!-- ════════ 登录 / 注册 ════════ -->
+<div id="authOverlay">
+  <div class="auth-box">
+    <div class="logo">📥</div>
+    <h2>智能收据管家</h2>
+    <div class="sub2">登录后才能解密你的资料</div>
+
+    <div id="loginForm">
+      <select id="loginUser" style="display:none"></select>
+      <input type="text" id="loginUserInput" placeholder="用户名" autocomplete="username" style="display:none">
+      <input type="password" id="loginPwd" placeholder="密码" autocomplete="current-password">
+      <button class="btn-primary" id="loginBtn">登录</button>
+      <button class="auth-link" id="showRegister">注册新账号</button>
+    </div>
+
+    <div id="registerForm" style="display:none">
+      <input type="text" id="regUser" placeholder="用户名" autocomplete="username">
+      <input type="password" id="regPwd" placeholder="密码（至少 6 位）" autocomplete="new-password">
+      <input type="password" id="regPwd2" placeholder="再输一遍密码" autocomplete="new-password">
+      <button class="btn-primary" id="registerBtn">注册并登录</button>
+      <button class="auth-link" id="showLogin">已有账号？去登录</button>
+    </div>
+
+    <div class="auth-err" id="authErr"></div>
+    <div class="auth-note">账号和数据只存在这台设备上，用你的密码 AES-256 加密。<br>⚠️ 密码无法找回——忘记密码 = 数据无法解密，请妥善保管。</div>
+  </div>
+</div>
+
 <script type="module">
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@latest";
 
@@ -185,12 +230,43 @@ const DEFAULT_TAGS = [
   {name:"书",count:0,keywords:["book","author","ISBN","书单","作者","读书笔记"],lastUsed:null},
   {name:"生活常识",count:0,keywords:["tips","how to","妙招","常识","技巧","攻略"],lastUsed:null},
 ];
-const load = () => {
-  try { const d = JSON.parse(localStorage.getItem("imgorg_data")); if (d && d.tags) return d; } catch {}
-  return { items:[], todos:[], giftcards:[], tags:structuredClone(DEFAULT_TAGS), reminders:[], processedCount:0 };
-};
-let D = load();
-const save = () => { localStorage.setItem("imgorg_data", JSON.stringify(D)); renderAll(); };
+const freshData = () => ({ items:[], todos:[], giftcards:[], tags:structuredClone(DEFAULT_TAGS),
+                           reminders:[], processedCount:0, apiKey:"" });
+let D = null, cryptoKey = null, currentUser = null;
+
+/* ── crypto (WebCrypto: PBKDF2 → AES-256-GCM) ── */
+const te = new TextEncoder(), td = new TextDecoder();
+const bufToB64 = buf => { const u = new Uint8Array(buf); let s = "";
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s); };
+const b64ToBuf = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const PBKDF2_ITER = 310000;
+async function deriveKey(password, saltB64, iterations = PBKDF2_ITER) {
+  const km = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name:"PBKDF2", salt: b64ToBuf(saltB64), iterations, hash:"SHA-256" },
+    km, { name:"AES-GCM", length:256 }, false, ["encrypt", "decrypt"]);
+}
+async function encryptObj(key, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, te.encode(JSON.stringify(obj)));
+  return { iv: bufToB64(iv), ct: bufToB64(ct) };
+}
+async function decryptObj(key, blob) {
+  const pt = await crypto.subtle.decrypt({ name:"AES-GCM", iv: b64ToBuf(blob.iv) }, key, b64ToBuf(blob.ct));
+  return JSON.parse(td.decode(pt));
+}
+
+/* ── accounts ── */
+const accounts = () => { try { return JSON.parse(localStorage.getItem("imgorg_accounts")) || {}; } catch { return {}; } };
+const saveAccounts = a => localStorage.setItem("imgorg_accounts", JSON.stringify(a));
+const vaultKey = user => "imgorg_vault_" + user;
+
+async function persist() {
+  if (!cryptoKey || !D || !currentUser) return;
+  try { localStorage.setItem(vaultKey(currentUser), JSON.stringify(await encryptObj(cryptoKey, D))); }
+  catch (e) { toast("⚠️ 保存失败: " + e.message); }
+}
+const save = () => { renderAll(); persist(); };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const todayStr = () => new Date().toLocaleDateString("sv");  // YYYY-MM-DD local
 
@@ -204,7 +280,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 });
 
 /* ───────── claude api ───────── */
-const getKey = () => localStorage.getItem("imgorg_apikey") || "";
+const getKey = () => (D && D.apiKey) || "";
 const client = () => new Anthropic({ apiKey: getKey(), dangerouslyAllowBrowser: true });
 const MODEL = "claude-opus-4-8";
 
@@ -469,7 +545,8 @@ ${JSON.stringify(D.tags, null, 1)}
 
 /* ───────── reminders ───────── */
 async function checkReminders() {
-  const due = D.reminders.filter(r => !r.fired && r.date <= todayStr());
+  if (!D) return;
+  const due = (D.reminders || []).filter(r => !r.fired && r.date <= todayStr());
   if (!due.length) return;
   for (const r of due) {
     r.fired = true;
@@ -486,8 +563,7 @@ $("notifBtn").onclick = async () => {
 };
 
 /* ───────── settings ───────── */
-$("apiKeyInput").value = getKey();
-$("saveKeyBtn").onclick = () => { localStorage.setItem("imgorg_apikey", $("apiKeyInput").value.trim()); toast("✅ 已保存"); renderAll(); };
+$("saveKeyBtn").onclick = () => { if (!D) return; D.apiKey = $("apiKeyInput").value.trim(); save(); toast("✅ 已保存（已加密）"); };
 $("exportBtn").onclick = () => {
   const blob = new Blob([JSON.stringify(D, null, 2)], { type:"application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
@@ -497,14 +573,21 @@ $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = async e => {
   try { const d = JSON.parse(await e.target.files[0].text());
     if (!d.tags) throw new Error("格式不对");
-    D = { reminders:[], processedCount:0, ...d }; save(); toast("✅ 导入成功");
+    D = { ...freshData(), ...d, apiKey: (D && D.apiKey) || d.apiKey || "" }; save(); toast("✅ 导入成功");
   } catch (err) { toast("导入失败: " + err.message); }
 };
-$("clearBtn").onclick = () => { if (confirm("确定清空全部数据？不可恢复。")) { localStorage.removeItem("imgorg_data"); D = load(); save(); toast("已清空"); } };
+$("clearBtn").onclick = () => {
+  if (confirm("确定清空当前账号的全部数据？不可恢复。")) {
+    const k = D ? D.apiKey : ""; D = freshData(); D.apiKey = k; save(); toast("已清空");
+  }
+};
 
 /* ───────── render ───────── */
 function renderAll() {
-  $("hdrBadge").textContent = getKey() ? "● 已连接" : "未设置 Key";
+  if (!D) { $("hdrBadge").textContent = "未登录"; return; }
+  $("hdrBadge").textContent = `👤 ${currentUser} · ${getKey() ? "●" : "无 Key"}`;
+  $("acctName").textContent = currentUser;
+  $("apiKeyInput").value = getKey();
   // todos
   const sorted = [...D.todos].sort((a,b) => {
     if ((a.status==="done") !== (b.status==="done")) return a.status==="done" ? 1 : -1;
@@ -557,8 +640,102 @@ $("gcAddBtn").onclick = () => {
   $("gcName").value = ""; $("gcAmount").value = ""; save(); toast("🎁 已建档");
 };
 
+/* ───────── auth ───────── */
+function renderAuth() {
+  const users = Object.keys(accounts());
+  const sel = $("loginUser"), inp = $("loginUserInput");
+  if (users.length) {
+    sel.innerHTML = users.map(u => `<option value="${u}">${u}</option>`).join("");
+    sel.style.display = "block"; inp.style.display = "none";
+    $("loginForm").style.display = "block"; $("registerForm").style.display = "none";
+  } else {
+    // no accounts yet → jump straight to register
+    $("loginForm").style.display = "none"; $("registerForm").style.display = "block";
+  }
+  $("authErr").textContent = "";
+}
+const authErr = m => { $("authErr").textContent = m; };
+
+function enterApp() {
+  $("authOverlay").classList.add("hidden");
+  $("loginPwd").value = ""; $("regPwd").value = ""; $("regPwd2").value = "";
+  renderAll(); checkReminders();
+}
+
+$("showRegister").onclick = () => { $("loginForm").style.display = "none"; $("registerForm").style.display = "block"; authErr(""); };
+$("showLogin").onclick = () => { renderAuth(); $("loginForm").style.display = "block"; $("registerForm").style.display = "none"; };
+
+$("loginBtn").onclick = async () => {
+  const user = $("loginUser").style.display !== "none" ? $("loginUser").value : $("loginUserInput").value.trim();
+  const pwd = $("loginPwd").value;
+  const acct = accounts()[user];
+  if (!acct) { authErr("账号不存在"); return; }
+  $("loginBtn").disabled = true; $("loginBtn").textContent = "解密中…";
+  try {
+    const key = await deriveKey(pwd, acct.salt, acct.iterations);
+    const blob = JSON.parse(localStorage.getItem(vaultKey(user)));
+    D = await decryptObj(key, blob);            // wrong password → throws
+    cryptoKey = key; currentUser = user;
+    enterApp();
+  } catch { authErr("密码不对（或数据损坏）"); }
+  finally { $("loginBtn").disabled = false; $("loginBtn").textContent = "登录"; }
+};
+
+$("registerBtn").onclick = async () => {
+  const user = $("regUser").value.trim(), pwd = $("regPwd").value, pwd2 = $("regPwd2").value;
+  if (!/^[\w一-龥-]{1,20}$/.test(user)) { authErr("用户名 1-20 位，字母/数字/中文"); return; }
+  if (accounts()[user]) { authErr("用户名已存在"); return; }
+  if (pwd.length < 6) { authErr("密码至少 6 位"); return; }
+  if (pwd !== pwd2) { authErr("两次密码不一致"); return; }
+  $("registerBtn").disabled = true; $("registerBtn").textContent = "创建中…";
+  try {
+    // migrate pre-account data into the FIRST account on this device
+    let initial = freshData();
+    const legacy = localStorage.getItem("imgorg_data");
+    if (legacy && !Object.keys(accounts()).length) {
+      try { const old = JSON.parse(legacy);
+        if (old && old.tags && confirm("检测到这台设备上有账号系统之前的数据，并入这个新账号吗？")) {
+          initial = { ...freshData(), ...old, apiKey: localStorage.getItem("imgorg_apikey") || "" };
+        }
+      } catch {}
+    }
+    const salt = bufToB64(crypto.getRandomValues(new Uint8Array(16)));
+    const key = await deriveKey(pwd, salt);
+    const a = accounts();
+    a[user] = { salt, iterations: PBKDF2_ITER, createdAt: todayStr() };
+    saveAccounts(a);
+    cryptoKey = key; currentUser = user; D = initial;
+    await persist();
+    localStorage.removeItem("imgorg_data"); localStorage.removeItem("imgorg_apikey");
+    enterApp(); toast("✅ 账号已创建，数据已加密");
+  } catch (e) { authErr("创建失败: " + e.message); }
+  finally { $("registerBtn").disabled = false; $("registerBtn").textContent = "注册并登录"; }
+};
+
+$("logoutBtn").onclick = () => {
+  D = null; cryptoKey = null; currentUser = null;
+  $("authOverlay").classList.remove("hidden");
+  renderAuth(); renderAll(); toast("已退出，数据已锁定");
+};
+
+$("chpwdBtn").onclick = async () => {
+  if (!currentUser) return;
+  const oldP = prompt("当前密码："); if (oldP == null) return;
+  try {
+    const acct = accounts()[currentUser];
+    const oldKey = await deriveKey(oldP, acct.salt, acct.iterations);
+    await decryptObj(oldKey, JSON.parse(localStorage.getItem(vaultKey(currentUser)))); // verify
+  } catch { toast("当前密码不对"); return; }
+  const newP = prompt("新密码（至少 6 位）："); if (newP == null) return;
+  if (newP.length < 6) { toast("密码至少 6 位"); return; }
+  const salt = bufToB64(crypto.getRandomValues(new Uint8Array(16)));
+  cryptoKey = await deriveKey(newP, salt);
+  const a = accounts(); a[currentUser] = { ...a[currentUser], salt, iterations: PBKDF2_ITER };
+  saveAccounts(a); await persist(); toast("✅ 密码已修改");
+};
+
+renderAuth();
 renderAll();
-checkReminders();
 setInterval(checkReminders, 60_000);
 
 /* ───────── pwa ───────── */
