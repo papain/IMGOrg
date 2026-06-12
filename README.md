@@ -1,10 +1,21 @@
 # IMGOrg — 智能收据 / 截图管理系统
 
-A personal document organizer powered by [Claude Code](https://claude.com/claude-code). Paste a screenshot, receipt, or PDF — Claude reads it, tags it, extracts the summary/date/amount, archives the file, tells you what's missing for reimbursement, and schedules reminders. A local HTML dashboard shows your to-dos (nearest due date first), gift card balances, and archive.
+A personal document organizer powered by Claude. Snap a screenshot, receipt, or PDF — Claude reads it, tags it, extracts the summary/date/amount, tells you what's missing for reimbursement, checks HCFSA eligibility via web search, tracks gift card balances, and schedules reminders.
 
-上传截图/收据/PDF → Claude 自动识别、打标签、提取摘要和日期、归档、告诉你报销还缺什么、安排提醒。本地 dashboard 显示待办（按时间从近到远）、礼品卡余额、归档记录。
+上传截图/收据/PDF → Claude 自动识别、打标签、提取摘要和日期、告诉你报销还缺什么、安排提醒、礼品卡实时记账。
 
-## Quick start
+## 📱 Use as an Android / iOS app (PWA)
+
+The app is hosted at **https://papain.github.io/IMGOrg/** — works anywhere, no Claude Code needed.
+
+1. Open the URL in Chrome (Android) or Safari (iOS).
+2. Menu → **"安装应用 / Add to Home Screen"** — it becomes a full-screen app.
+3. In ⚙️设置, paste your Claude API key (create one at [platform.claude.com](https://platform.claude.com)). The key and all data stay on your device (localStorage) — calls go directly to the Anthropic API, no middleman server.
+4. 📥处理 tab → take a photo / pick a screenshot / paste an image → Claude tags it, extracts everything, creates to-dos, checks FSA rules online, and tracks gift cards.
+
+Features: to-dos sorted nearest-due-first (overdue in red), DCFSA service-date logic with reminders, HCFSA eligibility lookup (✅/⚠️ LMN/❌), gift card auto-depletion + archiving, AI tag management suggestions, JSON export/import for backup.
+
+## 💻 Use with Claude Code (desktop power mode)
 
 1. Clone this repo anywhere:
    ```

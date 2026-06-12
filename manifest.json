@@ -1,0 +1,15 @@
+{
+  "name": "智能收据管家 IMGOrg",
+  "short_name": "收据管家",
+  "description": "Claude 驱动的收据/截图智能整理：自动打标签、报销待办、礼品卡记账",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#4f63d2",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
