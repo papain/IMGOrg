@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能收据管理 · Dashboard</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1a1d24; --muted: #6b7280;
+    --accent: #4f63d2; --accent-soft: #eef0fb; --danger: #d2444f; --danger-soft: #fdeeef;
+    --ok: #2e9e63; --ok-soft: #e9f7f0; --warn: #c98a1b; --warn-soft: #fdf5e6;
+    --border: #e5e7eb; --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 8px;}
+  h1 { font-size: 22px; }
+  h1 span { color: var(--accent); }
+  .updated { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .count-pill { background: var(--accent-soft); color: var(--accent); border-radius: 999px; font-size: 12px; padding: 1px 9px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+
+  /* todos */
+  .todo { display: flex; gap: 12px; padding: 10px 8px; border-radius: 8px; align-items: flex-start; }
+  .todo:hover { background: var(--accent-soft); }
+  .todo .due { min-width: 86px; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; text-align: center; background: var(--accent-soft); color: var(--accent); }
+  .todo.overdue .due { background: var(--danger-soft); color: var(--danger); }
+  .todo.today .due { background: var(--warn-soft); color: var(--warn); }
+  .todo .title { font-size: 14px; font-weight: 600; }
+  .todo .note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .todo .tagchip { font-size: 11px; }
+  .todo.done { opacity: .45; }
+  .todo.done .title { text-decoration: line-through; }
+
+  /* gift cards */
+  .gc { padding: 10px 6px; border-bottom: 1px dashed var(--border); }
+  .gc:last-child { border-bottom: none; }
+  .gc .row { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; }
+  .gc .bal { color: var(--ok); }
+  .gc.depleted .bal { color: var(--muted); }
+  .gc .bar { height: 6px; background: var(--border); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  .gc .bar i { display: block; height: 100%; background: var(--ok); border-radius: 4px; }
+  .gc.depleted .bar i { background: var(--muted); }
+  .gc .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .badge-depleted { font-size: 11px; color: var(--muted); border: 1px solid var(--border); padding: 1px 7px; border-radius: 999px; }
+
+  /* items */
+  .item { padding: 10px 6px; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .item:last-child { border-bottom: none; }
+  .item .top { display: flex; justify-content: space-between; gap: 8px; }
+  .item .date { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .item .next { color: var(--warn); font-size: 12px; margin-top: 3px; }
+  .tagchip { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 1px 8px; font-size: 12px; margin-right: 4px; }
+  .status-done { color: var(--ok); font-size: 11px; }
+  .status-archived { color: var(--muted); font-size: 11px; }
+
+  /* tags */
+  .tagstat { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; margin: 0 6px 8px 0; font-size: 13px; cursor: pointer; background: var(--card); }
+  .tagstat:hover, .tagstat.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .tagstat b { font-weight: 600; }
+  .tagstat .n { color: var(--muted); font-size: 12px; }
+  .filter-hint { font-size: 12px; color: var(--muted); margin-bottom: 8px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📥 智能收据管理 <span>Dashboard</span></h1>
+  <div class="updated" id="updated"></div>
+</header>
+
+<div class="card" id="tagsCard">
+  <h2>🏷️ 标签 <span class="count-pill" id="tagCount"></span></h2>
+  <div id="tags"></div>
+  <div class="filter-hint" id="filterHint">点击标签筛选，再点一次取消</div>
+</div>
+
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>✅ To-Do（按时间从近到远）<span class="count-pill" id="todoCount"></span></h2>
+      <div id="todos"></div>
+    </div>
+    <div class="card">
+      <h2>🗂️ 最近文档 <span class="count-pill" id="itemCount"></span></h2>
+      <div id="items"></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>🎁 Gift Cards <span class="count-pill" id="gcCount"></span></h2>
+      <div id="giftcards"></div>
+    </div>
+    <div class="card">
+      <h2>📦 已完成 / 已归档</h2>
+      <div id="doneItems"></div>
+    </div>
+  </div>
+</div>
+
+<script src="data/data.js"></script>
+<script>
+const D = window.APP_DATA || { items:[], todos:[], giftcards:[], tags:[] };
+const today = new Date(); today.setHours(0,0,0,0);
+let activeTag = null;
+
+const fmt = d => d || "—";
+const byId = id => document.getElementById(id);
+const itemOf = t => D.items.find(i => i.id === t.itemId);
+
+function dueClass(t) {
+  if (t.status === "done") return "done";
+  if (!t.dueDate) return "";
+  const dd = new Date(t.dueDate + "T00:00:00");
+  if (dd < today) return "overdue";
+  if (dd.getTime() === today.getTime()) return "today";
+  return "";
+}
+
+function render() {
+  // tags
+  const tags = [...D.tags].sort((a,b) => b.count - a.count);
+  byId("tagCount").textContent = tags.length;
+  byId("tags").innerHTML = tags.map(t =>
+    `<span class="tagstat ${activeTag===t.name?'active':''}" onclick="toggleTag('${t.name.replace(/'/g,"\\'")}')"><b>${t.name}</b><span class="n">${t.count}</span></span>`
+  ).join("") || '<div class="empty">暂无标签</div>';
+  byId("filterHint").style.display = "block";
+
+  const tagMatch = i => !activeTag || (i.tags||[]).includes(activeTag);
+
+  // todos: pending first, sorted by dueDate ascending (nearest first), done at bottom
+  let todos = D.todos.filter(t => { const it = itemOf(t); return !it || tagMatch(it); });
+  todos.sort((a,b) => {
+    if ((a.status==="done") !== (b.status==="done")) return a.status==="done" ? 1 : -1;
+    return (a.dueDate||"9999").localeCompare(b.dueDate||"9999");
+  });
+  byId("todoCount").textContent = todos.filter(t=>t.status!=="done").length + " 待办";
+  byId("todos").innerHTML = todos.map(t => {
+    const it = itemOf(t);
+    const chips = it ? (it.tags||[]).map(x=>`<span class="tagchip">${x}</span>`).join("") : "";
+    return `<div class="todo ${dueClass(t)}">
+      <div class="due">${fmt(t.dueDate)}</div>
+      <div><div class="title">${t.title}</div>
+      <div class="note">${chips}${t.note||""}</div></div>
+    </div>`;
+  }).join("") || '<div class="empty">🎉 没有待办事项</div>';
+
+  // active items (recent first)
+  const act = D.items.filter(i => i.status==="active" && tagMatch(i))
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  byId("itemCount").textContent = act.length;
+  byId("items").innerHTML = act.map(i => `
+    <div class="item">
+      <div class="top"><div>${(i.tags||[]).map(x=>`<span class="tagchip">${x}</span>`).join("")} ${i.summary}</div>
+      <div class="date">${fmt(i.date)}${i.amount!=null?` · $${i.amount}`:""}</div></div>
+      ${i.nextSteps?`<div class="next">⏭ ${i.nextSteps}</div>`:""}
+    </div>`).join("") || '<div class="empty">还没有文档，把截图发给 Claude 即可开始</div>';
+
+  // gift cards
+  const gcs = [...D.giftcards].sort((a,b)=>(a.status==="depleted")-(b.status==="depleted"));
+  byId("gcCount").textContent = gcs.filter(g=>g.status==="active").length + " 张可用";
+  byId("giftcards").innerHTML = gcs.map(g => {
+    const pct = g.initialBalance ? Math.max(0, Math.min(100, g.balance/g.initialBalance*100)) : 0;
+    const last = (g.transactions||[]).slice(-1)[0];
+    return `<div class="gc ${g.status==="depleted"?"depleted":""}">
+      <div class="row"><span>${g.name} ${g.status==="depleted"?'<span class="badge-depleted">已用完 · 归档</span>':""}</span>
+      <span class="bal">$${(+g.balance).toFixed(2)}</span></div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="meta">面额 $${(+g.initialBalance).toFixed(2)} · ${(g.transactions||[]).length} 笔消费${last?` · 最近 ${last.date} $${last.amount}`:""}</div>
+    </div>`;
+  }).join("") || '<div class="empty">暂无礼品卡</div>';
+
+  // done/archived
+  const done = D.items.filter(i => i.status!=="active" && tagMatch(i))
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,20);
+  byId("doneItems").innerHTML = done.map(i => `
+    <div class="item"><div class="top">
+      <div><span class="status-${i.status}">${i.status==="done"?"✔ 完成":"📦 归档"}</span> ${i.summary}</div>
+      <div class="date">${fmt(i.date)}</div>
+    </div></div>`).join("") || '<div class="empty">暂无</div>';
+
+  byId("updated").textContent = "数据文件：data/data.js · 刷新页面即更新";
+}
+
+function toggleTag(name){ activeTag = activeTag===name ? null : name; render(); }
+render();
+</script>
+</body>
+</html>

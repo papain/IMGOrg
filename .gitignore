@@ -1,0 +1,17 @@
+# Personal documents — never commit receipts, health records, etc.
+inbox/*
+archive/*
+!inbox/.gitkeep
+!archive/.gitkeep
+
+# Personal data store — repo ships with demo data only.
+# If you fork this and your repo is PRIVATE, you may remove this line to sync your data.
+data/data.local.js
+
+# Local Claude Code settings (machine-specific permissions)
+.claude/settings.local.json
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
