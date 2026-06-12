@@ -103,6 +103,10 @@
 
 <script src="data/data.js"></script>
 <script>
+// fresh clone: data/data.js is local-only (gitignored) — fall back to demo data
+if (!window.APP_DATA) document.write('<script src="data/data.example.js"><\/script>');
+</script>
+<script>
 const D = window.APP_DATA || { items:[], todos:[], giftcards:[], tags:[] };
 const today = new Date(); today.setHours(0,0,0,0);
 let activeTag = null;

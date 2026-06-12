@@ -4,8 +4,9 @@ archive/*
 !inbox/.gitkeep
 !archive/.gitkeep
 
-# Personal data store — repo ships with demo data only.
-# If you fork this and your repo is PRIVATE, you may remove this line to sync your data.
+# Personal data store — REPO IS PUBLIC, real data must never be committed.
+# data/data.js lives only on your machine; fresh clones copy data/data.example.js.
+data/data.js
 data/data.local.js
 
 # Local Claude Code settings (machine-specific permissions)

@@ -7,6 +7,8 @@
 所有数据存在 `data\data.js`，格式为 `window.APP_DATA = {...}`，内部是标准 JSON。
 **每次处理完文件后必须更新此文件**，dashboard.html 直接读取它。
 
+⚠️ **本仓库是 public**：`data\data.js` 在 .gitignore 里，只存在本地，绝不提交。新机器克隆后若没有 `data\data.js`，先从 `data\data.example.js` 复制一份再开始。`inbox\` 和 `archive\` 的内容同样不上传。
+
 数据结构：
 - `items[]` — 每个文档一条：id, file（归档后路径）, tags[], summary, date（事件发生日期 YYYY-MM-DD）, amount（金额，可选）, status（`active` | `done` | `archived`）, nextSteps（下一步建议文字）, createdAt
 - `todos[]` — 待办：id, itemId, title, dueDate, status（`pending` | `done`）, note
