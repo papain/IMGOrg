@@ -194,6 +194,10 @@
   <button data-view="settings"><span class="ico">⚙️</span>设置</button>
 </nav>
 <div class="toast" id="toast"></div>
+<div id="updateBanner" style="display:none;position:fixed;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom));z-index:60;background:var(--accent);color:#fff;padding:12px 16px;display:none;align-items:center;justify-content:space-between;gap:12px;font-size:13px;box-shadow:0 -2px 12px #0002">
+  <span>🎉 有新版本可用</span>
+  <button id="updateNowBtn" style="background:#fff;color:var(--accent);font-weight:600;border:none;border-radius:8px;padding:7px 16px;cursor:pointer">立即更新</button>
+</div>
 
 <!-- ════════ 编辑文档弹窗 ════════ -->
 <div id="editOverlay" style="position:fixed;inset:0;background:#0006;z-index:90;display:none;align-items:flex-end;justify-content:center">
@@ -936,8 +940,38 @@ renderAuth();
 renderAll();
 setInterval(checkReminders, 60_000);
 
-/* ───────── pwa ───────── */
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+/* ───────── pwa: register + 更新提示 ───────── */
+if ("serviceWorker" in navigator) {
+  let refreshing = false;
+  // when the new SW takes control, reload once to show the new version
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return; refreshing = true; location.reload();
+  });
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    // a waiting worker already present (updated in a previous visit)
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+    reg.addEventListener("updatefound", () => {
+      const nw = reg.installing; if (!nw) return;
+      nw.addEventListener("statechange", () => {
+        // installed + an existing controller ⇒ this is an update, not first install
+        if (nw.state === "installed" && navigator.serviceWorker.controller) showUpdate(nw);
+      });
+    });
+    // proactively check for updates each time the app is opened/refocused
+    const check = () => reg.update().catch(()=>{});
+    check();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  }).catch(()=>{});
+
+  function showUpdate(worker) {
+    const banner = $("updateBanner");
+    banner.style.display = "flex";
+    $("updateNowBtn").onclick = () => {
+      banner.style.display = "none";
+      worker.postMessage("SKIP_WAITING");   // tell the new SW to activate now → controllerchange → reload
+    };
+  }
+}
 </script>
 </body>
 </html>
