@@ -120,7 +120,7 @@
   <div id="previewArea"></div>
   <button class="btn-primary" id="processBtn" style="display:none">📴 离线识别整理</button>
   <div id="processResult"></div>
-  <div class="hint" id="processHint">完全离线：手机本地 OCR 读文字 → 关键词自动打标签 + 内置 HCFSA 规则库判断能否报销 + 提取金额/日期 → 生成待办。不联网、零费用。首次使用会下载语言包（约 15MB），之后缓存。</div>
+  <div class="hint" id="processHint">完全离线：手机本地 OCR 读文字 → 关键词自动打标签 + 内置 HCFSA 规则库判断能否报销 + 提取金额/日期 → 生成待办。不联网、零费用。首次使用会下载语言包（约 15MB），之后缓存。<br>📷 上传后会把<b>原图完整存进 App</b>（文档页点缩略图可看大图），所以处理完可以放心去手机相册删掉原图。</div>
 </section>
 
 <!-- ════════ 待办 ════════ -->
@@ -197,6 +197,11 @@
 <div id="updateBanner" style="display:none;position:fixed;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom));z-index:60;background:var(--accent);color:#fff;padding:12px 16px;display:none;align-items:center;justify-content:space-between;gap:12px;font-size:13px;box-shadow:0 -2px 12px #0002">
   <span>🎉 有新版本可用</span>
   <button id="updateNowBtn" style="background:#fff;color:var(--accent);font-weight:600;border:none;border-radius:8px;padding:7px 16px;cursor:pointer">立即更新</button>
+</div>
+
+<!-- ════════ 看原图弹窗 ════════ -->
+<div id="imgOverlay" style="position:fixed;inset:0;background:#000d;z-index:95;display:none;align-items:center;justify-content:center;padding:12px" onclick="this.style.display='none'">
+  <img id="imgFull" style="max-width:100%;max-height:92vh;border-radius:8px;object-fit:contain">
 </div>
 
 <!-- ════════ 编辑文档弹窗 ════════ -->
@@ -492,8 +497,11 @@ let pendingFile = null;   // {media_type, data(base64), isPdf, thumb}
 async function fileToPending(file) {
   if (file.type === "application/pdf") {
     const data = await blobToB64(file);
-    return { media_type:"application/pdf", data, isPdf:true, thumb:null, name:file.name };
+    return { media_type:"application/pdf", data, isPdf:true, thumb:null, original:null, name:file.name };
   }
+  // keep the ORIGINAL full-size image (data URL) so you have a complete backup in-app
+  // and can safely clear your phone album afterwards
+  const originalUrl = `data:${file.type};base64,${await blobToB64(file)}`;
   // resize image via canvas (cap long edge 2400px; high quality so OCR isn't fed JPEG noise)
   const img = await blobToImage(file);
   const scale = Math.min(1, 2400 / Math.max(img.width, img.height));
@@ -508,7 +516,7 @@ async function fileToPending(file) {
   tc.width = Math.round(img.width*ts); tc.height = Math.round(img.height*ts);
   tc.getContext("2d").drawImage(img, 0, 0, tc.width, tc.height);
   return { media_type:"image/jpeg", data: dataUrl.split(",")[1], isPdf:false,
-           thumb: tc.toDataURL("image/jpeg", 0.7), name:file.name||"截图" };
+           thumb: tc.toDataURL("image/jpeg", 0.7), original: originalUrl, name:file.name||"截图" };
 }
 const blobToB64 = blob => new Promise((res,rej) => {
   const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(blob);
@@ -611,17 +619,18 @@ function applyResult(r) {
   }
   if (r.next_steps) lines.push(`⏭️ ${r.next_steps}`);
 
-  // item
+  // item (keep the original full-size image as an in-app backup)
   const collectible = ["食谱","书","生活常识"].includes(r.category);
-  D.items.unshift({ id:itemId, thumb:pendingFile.thumb, tags:r.tags, summary:r.summary, date:r.date||todayStr(),
+  D.items.unshift({ id:itemId, thumb:pendingFile.thumb, original:pendingFile.original||null, tags:r.tags,
+    summary:r.summary, date:r.date||todayStr(),
     amount:r.amount, status: collectible ? "archived" : "active", nextSteps:r.next_steps||"", createdAt:todayStr() });
   // tag stats
   for (const n of r.tags) { const t = D.tags.find(x=>x.name===n); if (t) { t.count++; t.lastUsed = todayStr(); } }
   D.processedCount = (D.processedCount||0) + 1;
   save();
+  if (pendingFile && pendingFile.original) lines.push("📷 原图已完整存入 App（文档页点缩略图看大图），可放心去相册删掉这张");
   pendingFile = null; showPending();
   $("processResult").innerHTML = `<div class="result-box">${lines.join("\n")}</div>`;
-  if (D.processedCount % 10 === 0) toast("已处理 " + D.processedCount + " 个文件，可以去 🗂️文档 页点「AI 标签整理建议」");
 }
 
 const findCard = name => {
@@ -689,6 +698,10 @@ window._toggleEditTag = name => {
   renderEditTags();
 };
 window._editItem = id => { const it = D.items.find(i=>i.id===id); if (it) openEdit(it); };
+window._viewImg = id => {
+  const it = D.items.find(i=>i.id===id); if (!it || !it.original) return;
+  $("imgFull").src = it.original; $("imgOverlay").style.display = "flex";
+};
 $("editAddTagBtn").onclick = () => {
   const name = $("editNewTag").value.trim(); if (!name) return;
   if (!D.tags.find(t=>t.name===name)) D.tags.push({ name, count:0, keywords:[], lastUsed:null });
@@ -799,7 +812,10 @@ function renderAll() {
     : (D.items.length ? `${D.items.length} 篇` : "");
   $("itemList").innerHTML = shown.map(i => `
     <div class="item" onclick="_editItem('${i.id}')" style="cursor:pointer">
-      ${i.thumb ? `<img src="${i.thumb}">` : `<div class="ph">📄</div>`}
+      <div style="position:relative;flex-shrink:0" ${i.original?`onclick="event.stopPropagation();_viewImg('${i.id}')"`:''}>
+        ${i.thumb ? `<img src="${i.thumb}">` : `<div class="ph">📄</div>`}
+        ${i.original?`<span style="position:absolute;right:-2px;bottom:-2px;background:#000a;color:#fff;border-radius:6px;font-size:10px;padding:0 4px">🔍</span>`:''}
+      </div>
       <div style="flex:1">
         <div>${i.tags.map(x=>`<span class="tagchip">${x}</span>`).join("") || '<span class="tagchip" style="background:var(--warn-soft);color:var(--warn)">点此加标签</span>'}${i.summary}</div>
         <div class="meta">${i.date||""}${i.amount!=null?` · $${i.amount}`:""} · <span class="status-pill">${{active:"进行中",done:"✔完成",archived:"📦归档"}[i.status]}</span> · ✏️编辑</div>
