@@ -115,9 +115,16 @@
     <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none">
   </div>
   <div id="previewArea"></div>
-  <button class="btn-primary" id="processBtn" style="display:none">🤖 让 Claude 识别整理</button>
+  <div id="engineRow" style="display:none;margin-bottom:10px">
+    <label style="margin:0 0 6px">识别引擎</label>
+    <div style="display:flex;gap:8px">
+      <button class="btn-ghost btn-sm engine-opt active" data-engine="offline" style="flex:1">📴 离线 OCR（免费·不联网）</button>
+      <button class="btn-ghost btn-sm engine-opt" data-engine="claude" style="flex:1">🤖 Claude AI（需 Key·更准）</button>
+    </div>
+  </div>
+  <button class="btn-primary" id="processBtn" style="display:none">识别整理</button>
   <div id="processResult"></div>
-  <div class="hint">识别后自动：打标签 → 提取摘要/日期/金额 → 按类别生成待办（DCFSA 检查服务日期、HCFSA 联网查 FSA eligibility、礼品卡记账）→ 安排提醒。</div>
+  <div class="hint" id="processHint">默认<b>离线</b>：手机本地 OCR 读文字 → 关键词打标签 + 内置 HCFSA 规则库判断能否报销 + 提取金额/日期。完全不联网、零 API 费用。<br>填了 Claude key 后可切到 AI 引擎：看懂复杂版面、智能判断 DCFSA 服务日期、联网查最新 FSA 规则。</div>
 </section>
 
 <!-- ════════ 待办 ════════ -->
@@ -163,6 +170,12 @@
   <div class="card"><h2>🔔 提醒</h2>
     <button class="btn-ghost btn-sm" id="notifBtn">开启通知权限</button>
     <div class="hint">打开 App 时检查到期提醒（如「DCFSA 服务期已结束，可以上 Via Benefits 报账了」）并推送通知。</div>
+  </div>
+  <div class="card"><h2>📋 内置 HCFSA 报销规则</h2>
+    <div class="hint" style="text-align:left">离线模式用以下规则库判断（依据 IRS Pub 502 + CARES Act 2020）。点开查看：</div>
+    <details style="margin-top:8px"><summary style="font-size:13px;color:var(--accent);cursor:pointer">展开规则表</summary>
+      <div id="rulesTable" style="font-size:12px;margin-top:8px;line-height:1.6"></div>
+    </details>
   </div>
   <div class="card"><h2>💾 数据备份</h2>
     <button class="btn-ghost btn-sm" id="exportBtn">导出 JSON</button>
@@ -279,6 +292,124 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   b.classList.add("active"); $("view-"+b.dataset.view).classList.add("active");
 });
 
+/* ═══════════ 离线引擎 (OCR + 规则) ═══════════ */
+/* HCFSA eligibility 规则库（依据 IRS Pub 502 + CARES Act 2020 + fsastore/healthequity）
+   状态: eligible=可直接报 | needs_lmn=需医生 LMN | not_eligible=不可报
+   每条 keywords 命中即判定；先匹配 not_eligible，再 needs_lmn，再 eligible。*/
+const HCFSA_RULES = [
+  // ❌ 明确不可报
+  { status:"not_eligible", reason:"日常洗护用品，非医疗用途", kw:["toothpaste","牙膏","mouthwash","漱口水","shampoo","洗发","deodorant","除臭","body wash","沐浴露","perfume","香水","makeup","化妆","cosmetic","美妆","lotion","身体乳"] },
+  { status:"not_eligible", reason:"一般健身/健康消费，非治疗特定疾病", kw:["gym","健身房","membership","会员","fitness club","健身卡","spa","水疗"] },
+  { status:"not_eligible", reason:"美容整形类，非医疗必需", kw:["teeth whitening","美白牙","botox","cosmetic surgery","整形","医美","face lift"] },
+  // ⚠️ 需要 LMN（Letter of Medical Necessity）
+  { status:"needs_lmn", reason:"一般维生素/膳食补剂需医生证明医疗必要性（孕期维生素除外）", kw:["vitamin","维生素","supplement","补剂","fish oil","鱼油","probiotic","益生菌","protein powder","蛋白粉","collagen","胶原"], unless:["prenatal","孕"] },
+  { status:"needs_lmn", reason:"双重用途商品/服务，需 LMN 说明医疗必要性和疗程", kw:["massage","按摩","orthopedic","矫形","arch support","足弓","weight loss","减肥","snore","打鼾","humidifier","加湿器"] },
+  // ✅ 可直接报（CARES Act 后 OTC 药品无需处方）
+  { status:"eligible", reason:"处方药，可直接报", kw:["prescription","处方","rx","pharmacy","药房","药店","cvs","walgreens","rite aid"] },
+  { status:"eligible", reason:"OTC 非处方药，CARES Act 后无需处方即可报", kw:["ibuprofen","布洛芬","acetaminophen","tylenol","泰诺","aspirin","阿司匹林","antacid","胃药","allergy","过敏","claritin","zyrtec","benadryl","cough","止咳","cold medicine","感冒药","antihistamine","pain relief","止痛","退烧","fever"] },
+  { status:"eligible", reason:"急救/医疗耗材，可直接报", kw:["bandage","创可贴","band-aid","gauze","纱布","first aid","急救","thermometer","体温计","blood pressure","血压计","glucose","血糖","test strip","试纸","brace","护具","crutch","拐杖"] },
+  { status:"eligible", reason:"经期护理用品，CARES Act 后可报", kw:["tampon","卫生棉条","pad","卫生巾","menstrual","经期","period care","panty liner","护垫","menstrual cup","月经杯"] },
+  { status:"eligible", reason:"防晒 SPF15+ 广谱可报", kw:["sunscreen","防晒霜","spf","sunblock"] },
+  { status:"eligible", reason:"视力相关，可直接报", kw:["contact lens","隐形眼镜","contact solution","护理液","glasses","眼镜","prescription glasses","reading glasses","老花镜","eye exam","验光"] },
+  { status:"eligible", reason:"牙科治疗（非美容），可直接报", kw:["dental","牙科","filling","补牙","cleaning","洗牙","root canal","根管","crown","牙冠","braces","牙套","orthodontic","正畸"] },
+  { status:"eligible", reason:"母婴医疗用品，可直接报", kw:["breast pump","吸奶器","prenatal","孕期维生素","nursing pad","防溢乳垫"] },
+  { status:"eligible", reason:"就诊自付/挂号费，可直接报", kw:["copay","copayment","自付","挂号","诊费","office visit","clinic","诊所","urgent care","急诊","specialist"] },
+];
+function classifyHCFSA(text) {
+  const t = text.toLowerCase();
+  for (const rule of HCFSA_RULES) {
+    const hit = rule.kw.some(k => t.includes(k.toLowerCase()));
+    const blocked = rule.unless && rule.unless.some(k => t.includes(k.toLowerCase()));
+    if (hit && !blocked) return { eligibility: rule.status, reason: rule.reason };
+  }
+  return { eligibility: "unknown", reason: "无法从文字判断，建议保留 itemized receipt 后人工核对，或填 Claude key 用 AI 联网查" };
+}
+
+/* 标签匹配 */
+function matchTags(text) {
+  const t = text.toLowerCase();
+  const scored = D.tags.map(tag => ({
+    name: tag.name,
+    score: (tag.keywords || []).filter(k => t.includes(k.toLowerCase())).length
+  })).filter(x => x.score > 0).sort((a,b) => b.score - a.score);
+  return scored.slice(0, 2).map(x => x.name);
+}
+
+/* 金额 / 日期提取 */
+function extractAmount(text) {
+  const matches = [...text.matchAll(/(?:total|合计|总计|金额|amount due|grand total|应付)[:\s]*\$?\s*([\d,]+\.\d{2})/gi)]
+    .map(m => parseFloat(m[1].replace(/,/g,"")));
+  if (matches.length) return Math.max(...matches);
+  const all = [...text.matchAll(/\$\s*([\d,]+\.\d{2})/g)].map(m => parseFloat(m[1].replace(/,/g,"")));
+  return all.length ? Math.max(...all) : null;
+}
+function extractDate(text) {
+  let m = text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  m = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b/);  // MM/DD/YYYY
+  if (m) return `${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
+  m = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  return null;
+}
+
+/* OCR via Tesseract.js UMD build (lazy-loaded via <script>, sets window.Tesseract; cached by SW) */
+let _tess = null, _tessLoading = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (_tessLoading) return _tessLoading;
+  _tessLoading = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload = res; s.onerror = () => rej(new Error("无法加载 OCR 引擎（检查网络，或改用 Claude 引擎）"));
+    document.head.appendChild(s);
+  });
+  return _tessLoading;
+}
+async function ocrImage(base64, mediaType) {
+  await loadTesseract();
+  if (!_tess) _tess = await window.Tesseract.createWorker(["chi_sim","eng"]);
+  const { data } = await _tess.recognize(`data:${mediaType};base64,${base64}`);
+  return data.text || "";
+}
+
+/* 离线分析：把 OCR 文字跑成和 Claude 同结构的结果 */
+function analyzeOffline(text) {
+  let tags = matchTags(text);
+  const cat = tags[0] || "其他";
+  const amount = extractAmount(text);
+  const date = extractDate(text);
+  const firstLine = (text.split("\n").map(s=>s.trim()).filter(Boolean)[0] || "").slice(0, 40);
+  const r = { tags, new_tag:null, summary:"", date, amount, merchant:firstLine,
+    category: cat, dcfsa:null, hcfsa:null, giftcard:null, todos:[], reminder:null, next_steps:"" };
+
+  if (tags.includes("HCFSA")) {
+    const v = classifyHCFSA(text); r.hcfsa = { ...v, missing:[] };
+    if (v.eligibility === "eligible")
+      r.todos.push({ title:"上传 HCFSA 报销", dueDate: addDays(todayStr(), 7), note:v.reason });
+    else if (v.eligibility === "needs_lmn")
+      r.todos.push({ title:"找医生开 Letter of Medical Necessity", dueDate: addDays(todayStr(),14), note:v.reason });
+  }
+  if (tags.includes("DCFSA")) {
+    r.dcfsa = { service_start:null, service_end:date, can_file_now:true,
+      missing:["请人工确认服务日期、provider、被照顾人姓名（离线模式无法智能判断未来/过去）"] };
+    r.todos.push({ title:"核对 DCFSA 收据要素后上传 Via Benefits", dueDate: todayStr(), note:"离线识别，请确认服务日期是否已过" });
+  }
+  if (tags.includes("Gift card")) {
+    r.giftcard = { is_new_card:false, card_name:firstLine, face_value:null, spend_amount:amount, spend_note:"OCR 识别" };
+  }
+  if (tags.includes("Work travel"))
+    r.todos.push({ title:"提交 expense report", dueDate: addDays(todayStr(),7), note:"work travel" });
+
+  const parts = [];
+  if (amount != null) parts.push(`$${amount}`);
+  if (firstLine) parts.push(firstLine);
+  r.summary = (parts.join(" · ") || text.slice(0,30).replace(/\n/g," ")) + "（离线 OCR 识别）";
+  r.next_steps = tags.length ? "" : "未匹配到标签，可手动归类或填 Claude key 用 AI 识别";
+  return r;
+}
+const addDays = (d, n) => { const dt = new Date(d + "T00:00:00"); dt.setDate(dt.getDate()+n); return dt.toLocaleDateString("sv"); };
+
 /* ───────── claude api ───────── */
 const getKey = () => (D && D.apiKey) || "";
 const client = () => new Anthropic({ apiKey: getKey(), dangerouslyAllowBrowser: true });
@@ -388,8 +519,21 @@ function showPending() {
        : `<img class="preview-img" src="data:image/jpeg;base64,${pendingFile.data}">`)
     : "";
   $("processBtn").style.display = pendingFile ? "block" : "none";
+  $("engineRow").style.display = pendingFile ? "block" : "none";
+  if (pendingFile) syncEngineUI();
   $("processResult").innerHTML = "";
 }
+
+/* engine selection (default offline; auto-bump to claude when a key exists) */
+let engine = "offline";
+function syncEngineUI() {
+  document.querySelectorAll(".engine-opt").forEach(b => b.classList.toggle("active", b.dataset.engine === engine));
+  $("processBtn").textContent = engine === "claude" ? "🤖 让 Claude 识别整理" : "📴 离线识别整理";
+}
+document.querySelectorAll(".engine-opt").forEach(b => b.onclick = () => {
+  if (b.dataset.engine === "claude" && !getKey()) { toast("用 Claude 需先在 ⚙️设置 填 API Key"); return; }
+  engine = b.dataset.engine; syncEngineUI();
+});
 async function acceptFile(file) {
   if (!file) return;
   try { pendingFile = await fileToPending(file); showPending(); }
@@ -407,19 +551,29 @@ document.addEventListener("paste", e => {
 
 /* ───────── process pipeline ───────── */
 $("processBtn").onclick = async () => {
-  if (!getKey()) { toast("请先在 ⚙️设置 里填入 Claude API Key"); return; }
   if (!pendingFile) return;
-  const btn = $("processBtn");
-  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span>Claude 识别中…（HCFSA 会联网查规则，稍等）`;
+  const btn = $("processBtn"); const orig = btn.textContent;
+  btn.disabled = true;
   try {
-    const block = pendingFile.isPdf
-      ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:pendingFile.data } }
-      : { type:"image", source:{ type:"base64", media_type:pendingFile.media_type, data:pendingFile.data } };
-    const r = await callClaude([ block, { type:"text", text:"识别并整理这个文档。" } ]);
+    let r;
+    if (engine === "claude") {
+      if (!getKey()) { toast("请先在 ⚙️设置 填 Claude API Key"); return; }
+      btn.innerHTML = `<span class="spinner"></span>Claude 识别中…（HCFSA 联网查规则）`;
+      const block = pendingFile.isPdf
+        ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:pendingFile.data } }
+        : { type:"image", source:{ type:"base64", media_type:pendingFile.media_type, data:pendingFile.data } };
+      r = await callClaude([ block, { type:"text", text:"识别并整理这个文档。" } ]);
+    } else {
+      if (pendingFile.isPdf) { toast("离线模式暂不支持 PDF，请用图片，或切到 Claude 引擎"); return; }
+      btn.innerHTML = `<span class="spinner"></span>本地 OCR 识别中…（首次会下载语言包，请稍候）`;
+      const text = await ocrImage(pendingFile.data, pendingFile.media_type);
+      if (!text.trim()) { $("processResult").innerHTML = `<div class="result-box err">未识别出文字，换张更清晰的图，或切到 Claude 引擎</div>`; return; }
+      r = analyzeOffline(text);
+    }
     applyResult(r);
   } catch (e) {
     $("processResult").innerHTML = `<div class="result-box err">❌ ${e.message || e}</div>`;
-  } finally { btn.disabled = false; btn.textContent = "🤖 让 Claude 识别整理"; }
+  } finally { btn.disabled = false; syncEngineUI(); }
 };
 
 function applyResult(r) {
@@ -733,6 +887,15 @@ $("chpwdBtn").onclick = async () => {
   const a = accounts(); a[currentUser] = { ...a[currentUser], salt, iterations: PBKDF2_ITER };
   saveAccounts(a); await persist(); toast("✅ 密码已修改");
 };
+
+/* render the HCFSA rules reference */
+(() => {
+  const icon = { eligible:"✅", needs_lmn:"⚠️", not_eligible:"❌" };
+  const label = { eligible:"可直接报", needs_lmn:"需 LMN", not_eligible:"不可报" };
+  $("rulesTable").innerHTML = HCFSA_RULES.map(r =>
+    `<div style="padding:5px 0;border-bottom:1px dashed var(--border)">${icon[r.status]} <b>${label[r.status]}</b> — ${r.reason}<br>
+     <span style="color:var(--muted)">关键词：${r.kw.slice(0,6).join("、")}…</span></div>`).join("");
+})();
 
 renderAuth();
 renderAll();

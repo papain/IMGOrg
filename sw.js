@@ -1,4 +1,4 @@
-const CACHE = "imgorg-v2";
+const CACHE = "imgorg-v3";
 const SHELL = ["./", "index.html", "manifest.json", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -13,6 +13,7 @@ self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
   if (url.hostname.includes("anthropic.com")) return; // API: always network
+  // Tesseract.js core/wasm/lang packs & esm.sh modules: cache-first (large, immutable) so offline OCR works after first run
   // app shell + CDN modules: stale-while-revalidate
   e.respondWith(
     caches.match(e.request).then(cached => {

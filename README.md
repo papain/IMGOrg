@@ -14,7 +14,12 @@ The app is hosted at **https://papain.github.io/IMGOrg/** — works anywhere, no
 4. In ⚙️设置, paste your Claude API key (create one at [platform.claude.com](https://platform.claude.com)). Everything stays on your device — calls go directly to the Anthropic API, no middleman server.
 5. 📥处理 tab → take a photo / pick a screenshot / paste an image → Claude tags it, extracts everything, creates to-dos, checks FSA rules online, and tracks gift cards.
 
-Features: to-dos sorted nearest-due-first (overdue in red), DCFSA service-date logic with reminders, HCFSA eligibility lookup (✅/⚠️ LMN/❌), gift card auto-depletion + archiving, AI tag management suggestions, JSON export/import for backup.
+### Two recognition engines
+
+- **📴 Offline (default, free, no internet):** on-device OCR (Tesseract.js, Chinese + English) reads the text, then a built-in rule engine tags it, extracts amount/date, and classifies **HCFSA eligibility** against a baked-in rule set (IRS Pub 502 + CARES Act 2020 — OTC meds ✅, menstrual care ✅, sunscreen SPF15+ ✅, vitamins ⚠️ LMN, toothpaste/gym ❌, etc.). Zero API cost, works on a plane. First run downloads ~15MB language packs, then cached.
+- **🤖 Claude AI (opt-in, needs key):** handles complex layouts, smart DCFSA service-date logic, and live web lookup for edge-case FSA rules.
+
+Features: to-dos sorted nearest-due-first (overdue in red), DCFSA service-date logic with reminders, built-in/online HCFSA eligibility (✅/⚠️ LMN/❌), gift card auto-depletion + archiving, AI tag suggestions, JSON export/import for backup.
 
 ## 💻 Use with Claude Code (desktop power mode)
 
