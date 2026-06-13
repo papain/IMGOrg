@@ -102,7 +102,7 @@
 </head>
 <body>
 <header>
-  <div><h1>📥 智能收据管家</h1><div class="sub">IMGOrg · Claude 驱动</div></div>
+  <div><h1>📥 智能收据管家</h1><div class="sub">IMGOrg · 离线 OCR</div></div>
   <div id="hdrBadge" style="font-size:12px;background:#fff2;border-radius:999px;padding:3px 10px"></div>
 </header>
 <main>
@@ -115,16 +115,9 @@
     <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none">
   </div>
   <div id="previewArea"></div>
-  <div id="engineRow" style="display:none;margin-bottom:10px">
-    <label style="margin:0 0 6px">识别引擎</label>
-    <div style="display:flex;gap:8px">
-      <button class="btn-ghost btn-sm engine-opt active" data-engine="offline" style="flex:1">📴 离线 OCR（免费·不联网）</button>
-      <button class="btn-ghost btn-sm engine-opt" data-engine="claude" style="flex:1">🤖 Claude AI（需 Key·更准）</button>
-    </div>
-  </div>
-  <button class="btn-primary" id="processBtn" style="display:none">识别整理</button>
+  <button class="btn-primary" id="processBtn" style="display:none">📴 离线识别整理</button>
   <div id="processResult"></div>
-  <div class="hint" id="processHint">默认<b>离线</b>：手机本地 OCR 读文字 → 关键词打标签 + 内置 HCFSA 规则库判断能否报销 + 提取金额/日期。完全不联网、零 API 费用。<br>填了 Claude key 后可切到 AI 引擎：看懂复杂版面、智能判断 DCFSA 服务日期、联网查最新 FSA 规则。</div>
+  <div class="hint" id="processHint">完全离线：手机本地 OCR 读文字 → 关键词自动打标签 + 内置 HCFSA 规则库判断能否报销 + 提取金额/日期 → 生成待办。不联网、零费用。首次使用会下载语言包（约 15MB），之后缓存。</div>
 </section>
 
 <!-- ════════ 待办 ════════ -->
@@ -137,8 +130,6 @@
 <!-- ════════ 文档 ════════ -->
 <section class="view" id="view-items">
   <div class="card"><h2>🏷️ 标签</h2><div id="tagStats"></div>
-    <button class="btn-ghost btn-sm" id="tagAdviceBtn">🤖 AI 标签整理建议</button>
-    <div id="tagAdvice" style="font-size:13px;margin-top:8px;white-space:pre-wrap"></div>
   </div>
   <div class="card"><h2>🗂️ 文档</h2><div id="itemList"></div></div>
 </section>
@@ -161,11 +152,6 @@
     <button class="btn-ghost btn-sm" id="logoutBtn">退出登录</button>
     <button class="btn-ghost btn-sm" id="chpwdBtn">修改密码</button>
     <div class="hint">数据用你的密码 AES-256 加密存在本机，退出后需重新登录解密。密码无法找回，请牢记。</div>
-  </div>
-  <div class="card"><h2>🔑 Claude API Key</h2>
-    <input type="password" id="apiKeyInput" placeholder="sk-ant-...">
-    <button class="btn-ghost btn-sm" id="saveKeyBtn" style="margin-top:8px">保存</button>
-    <div class="hint">在 platform.claude.com 创建 API key。Key 只保存在你手机本地（localStorage），直连 Anthropic API，不经过任何第三方服务器。</div>
   </div>
   <div class="card"><h2>🔔 提醒</h2>
     <button class="btn-ghost btn-sm" id="notifBtn">开启通知权限</button>
@@ -228,8 +214,6 @@
 </div>
 
 <script type="module">
-import Anthropic from "https://esm.sh/@anthropic-ai/sdk@latest";
-
 /* ───────── storage ───────── */
 const DEFAULT_TAGS = [
   {name:"DCFSA",count:0,keywords:["dependent care","daycare","preschool","summer camp","childcare","托儿","幼儿园","夏令营"],lastUsed:null},
@@ -244,7 +228,7 @@ const DEFAULT_TAGS = [
   {name:"生活常识",count:0,keywords:["tips","how to","妙招","常识","技巧","攻略"],lastUsed:null},
 ];
 const freshData = () => ({ items:[], todos:[], giftcards:[], tags:structuredClone(DEFAULT_TAGS),
-                           reminders:[], processedCount:0, apiKey:"" });
+                           reminders:[], processedCount:0 });
 let D = null, cryptoKey = null, currentUser = null;
 
 /* ── crypto (WebCrypto: PBKDF2 → AES-256-GCM) ── */
@@ -322,7 +306,7 @@ function classifyHCFSA(text) {
     const blocked = rule.unless && rule.unless.some(k => t.includes(k.toLowerCase()));
     if (hit && !blocked) return { eligibility: rule.status, reason: rule.reason };
   }
-  return { eligibility: "unknown", reason: "无法从文字判断，建议保留 itemized receipt 后人工核对，或填 Claude key 用 AI 联网查" };
+  return { eligibility: "unknown", reason: "无法从文字判断，建议保留 itemized receipt 后人工核对" };
 }
 
 /* 标签匹配 */
@@ -361,7 +345,7 @@ function loadTesseract() {
   _tessLoading = new Promise((res, rej) => {
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    s.onload = res; s.onerror = () => rej(new Error("无法加载 OCR 引擎（检查网络，或改用 Claude 引擎）"));
+    s.onload = res; s.onerror = () => rej(new Error("无法加载 OCR 引擎（首次需联网下载，请检查网络）"));
     document.head.appendChild(s);
   });
   return _tessLoading;
@@ -373,7 +357,7 @@ async function ocrImage(base64, mediaType) {
   return data.text || "";
 }
 
-/* 离线分析：把 OCR 文字跑成和 Claude 同结构的结果 */
+/* 离线分析：把 OCR 文字跑成结构化结果 */
 function analyzeOffline(text) {
   let tags = matchTags(text);
   const cat = tags[0] || "其他";
@@ -405,81 +389,10 @@ function analyzeOffline(text) {
   if (amount != null) parts.push(`$${amount}`);
   if (firstLine) parts.push(firstLine);
   r.summary = (parts.join(" · ") || text.slice(0,30).replace(/\n/g," ")) + "（离线 OCR 识别）";
-  r.next_steps = tags.length ? "" : "未匹配到标签，可手动归类或填 Claude key 用 AI 识别";
+  r.next_steps = tags.length ? "" : "未匹配到标签，可在文档页手动归类";
   return r;
 }
 const addDays = (d, n) => { const dt = new Date(d + "T00:00:00"); dt.setDate(dt.getDate()+n); return dt.toLocaleDateString("sv"); };
-
-/* ───────── claude api ───────── */
-const getKey = () => (D && D.apiKey) || "";
-const client = () => new Anthropic({ apiKey: getKey(), dangerouslyAllowBrowser: true });
-const MODEL = "claude-opus-4-8";
-
-const SCHEMA = {
-  type:"object", additionalProperties:false,
-  required:["tags","new_tag","summary","date","amount","merchant","category","dcfsa","hcfsa","giftcard","todos","reminder","next_steps"],
-  properties:{
-    tags:{type:"array",items:{type:"string"}},
-    new_tag:{anyOf:[{type:"null"},{type:"object",additionalProperties:false,required:["name","keywords"],
-      properties:{name:{type:"string"},keywords:{type:"array",items:{type:"string"}}}}]},
-    summary:{type:"string"},
-    date:{anyOf:[{type:"string"},{type:"null"}]},
-    amount:{anyOf:[{type:"number"},{type:"null"}]},
-    merchant:{type:"string"},
-    category:{type:"string",enum:["DCFSA","HCFSA","Work travel","Gift card","食谱","爸妈健康","北卡出租房","湾区租房","书","生活常识","其他"]},
-    dcfsa:{anyOf:[{type:"null"},{type:"object",additionalProperties:false,required:["service_start","service_end","can_file_now","missing"],
-      properties:{service_start:{anyOf:[{type:"string"},{type:"null"}]},service_end:{anyOf:[{type:"string"},{type:"null"}]},
-        can_file_now:{type:"boolean"},missing:{type:"array",items:{type:"string"}}}}]},
-    hcfsa:{anyOf:[{type:"null"},{type:"object",additionalProperties:false,required:["eligibility","reason","missing"],
-      properties:{eligibility:{type:"string",enum:["eligible","needs_lmn","not_eligible","unknown"]},reason:{type:"string"},
-        missing:{type:"array",items:{type:"string"}}}}]},
-    giftcard:{anyOf:[{type:"null"},{type:"object",additionalProperties:false,required:["is_new_card","card_name","face_value","spend_amount","spend_note"],
-      properties:{is_new_card:{type:"boolean"},card_name:{type:"string"},face_value:{anyOf:[{type:"number"},{type:"null"}]},
-        spend_amount:{anyOf:[{type:"number"},{type:"null"}]},spend_note:{type:"string"}}}]},
-    todos:{type:"array",items:{type:"object",additionalProperties:false,required:["title","dueDate","note"],
-      properties:{title:{type:"string"},dueDate:{anyOf:[{type:"string"},{type:"null"}]},note:{type:"string"}}}},
-    reminder:{anyOf:[{type:"null"},{type:"object",additionalProperties:false,required:["date","message"],
-      properties:{date:{type:"string"},message:{type:"string"}}}]},
-    next_steps:{type:"string"}
-  }
-};
-
-const systemPrompt = () => `你是个人文档管理助手。用户上传收据/截图/PDF，你识别内容并按规则分类整理。今天是 ${todayStr()}。
-
-现有标签（优先从中选 1-2 个；都不匹配时在 new_tag 提议新标签）：
-${D.tags.map(t=>`- ${t.name}（关键词: ${t.keywords.join(", ")}）`).join("\n")}
-
-分类规则：
-- DCFSA（托儿费）：只能在服务发生后报销（渠道 Via Benefits）。提取服务起止日期；若结束日期在未来 → can_file_now=false，并在 reminder 给出服务结束次日的提醒（message 格式「【DCFSA】XX收据 — 服务期已结束，现在可以上 Via Benefits 报账了」），todos 加一条 dueDate=服务结束次日的待办；若已发生 → can_file_now=true，todos 加 dueDate=今天的「上传 Via Benefits 报销」。检查收据要素（provider 名称、服务日期范围、金额、被照顾人姓名），缺的写进 missing。
-- HCFSA（医疗）：用 web_search 查该商品/服务是否 FSA eligible（参考 IRS Publication 502 和 fsastore.com eligibility list）。eligible=可直接报；needs_lmn=需医生开 Letter of Medical Necessity（todos 加「找医生开 LMN」）；not_eligible=不可报。可报的 todos 加「上传 HCFSA 报销」（dueDate=今天+7天）。收据需含日期、商家、明细、金额，缺明细的信用卡小票不合格，写进 missing。
-- Work travel：todos 加「提交 expense report」，dueDate=行程结束后 7 天。
-- Gift card：新卡 → is_new_card=true 并填 face_value；消费小票/余额截图 → spend_amount 填本次消费额。
-- 食谱/书/生活常识：纯收藏，todos 留空。食谱在 summary 里带菜名和关键食材；书带书名/作者。
-- 爸妈健康：提取检查项目和关键指标进 summary；有复查/随访日期 → 建 reminder 和 todo。
-- 北卡出租房/湾区租房：有截止日期（租金 due、续约）→ 建 todo 和 reminder。
-
-通用：summary 用一句中文概括；date 是内容里的事件/交易日期（YYYY-MM-DD），不是今天；金额没有就 null。todos 的 dueDate 必须是 YYYY-MM-DD。不相关的分类字段填 null。`;
-
-async function callClaude(content, useSearch=true) {
-  const c = client();
-  const params = msgs => ({
-    model: MODEL, max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    system: systemPrompt(),
-    ...(useSearch ? { tools: [{ type:"web_search_20260209", name:"web_search" }] } : {}),
-    output_config: { format: { type:"json_schema", schema: SCHEMA } },
-    messages: msgs,
-  });
-  let messages = [{ role:"user", content }];
-  let resp = await c.messages.create(params(messages));
-  let guard = 0;
-  while (resp.stop_reason === "pause_turn" && guard++ < 5) {
-    messages = [...messages, { role:"assistant", content: resp.content }];
-    resp = await c.messages.create(params(messages));
-  }
-  const text = [...resp.content].reverse().find(b => b.type === "text")?.text;
-  return JSON.parse(text);
-}
 
 /* ───────── file handling ───────── */
 let pendingFile = null;   // {media_type, data(base64), isPdf, thumb}
@@ -519,21 +432,8 @@ function showPending() {
        : `<img class="preview-img" src="data:image/jpeg;base64,${pendingFile.data}">`)
     : "";
   $("processBtn").style.display = pendingFile ? "block" : "none";
-  $("engineRow").style.display = pendingFile ? "block" : "none";
-  if (pendingFile) syncEngineUI();
   $("processResult").innerHTML = "";
 }
-
-/* engine selection (default offline; auto-bump to claude when a key exists) */
-let engine = "offline";
-function syncEngineUI() {
-  document.querySelectorAll(".engine-opt").forEach(b => b.classList.toggle("active", b.dataset.engine === engine));
-  $("processBtn").textContent = engine === "claude" ? "🤖 让 Claude 识别整理" : "📴 离线识别整理";
-}
-document.querySelectorAll(".engine-opt").forEach(b => b.onclick = () => {
-  if (b.dataset.engine === "claude" && !getKey()) { toast("用 Claude 需先在 ⚙️设置 填 API Key"); return; }
-  engine = b.dataset.engine; syncEngineUI();
-});
 async function acceptFile(file) {
   if (!file) return;
   try { pendingFile = await fileToPending(file); showPending(); }
@@ -552,34 +452,23 @@ document.addEventListener("paste", e => {
 /* ───────── process pipeline ───────── */
 $("processBtn").onclick = async () => {
   if (!pendingFile) return;
-  const btn = $("processBtn"); const orig = btn.textContent;
+  const btn = $("processBtn");
   btn.disabled = true;
   try {
-    let r;
-    if (engine === "claude") {
-      if (!getKey()) { toast("请先在 ⚙️设置 填 Claude API Key"); return; }
-      btn.innerHTML = `<span class="spinner"></span>Claude 识别中…（HCFSA 联网查规则）`;
-      const block = pendingFile.isPdf
-        ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:pendingFile.data } }
-        : { type:"image", source:{ type:"base64", media_type:pendingFile.media_type, data:pendingFile.data } };
-      r = await callClaude([ block, { type:"text", text:"识别并整理这个文档。" } ]);
-    } else {
-      if (pendingFile.isPdf) { toast("离线模式暂不支持 PDF，请用图片，或切到 Claude 引擎"); return; }
-      btn.innerHTML = `<span class="spinner"></span>本地 OCR 识别中…（首次会下载语言包，请稍候）`;
-      const text = await ocrImage(pendingFile.data, pendingFile.media_type);
-      if (!text.trim()) { $("processResult").innerHTML = `<div class="result-box err">未识别出文字，换张更清晰的图，或切到 Claude 引擎</div>`; return; }
-      r = analyzeOffline(text);
-    }
-    applyResult(r);
+    if (pendingFile.isPdf) { toast("离线模式暂不支持 PDF，请改用图片/截图"); return; }
+    btn.innerHTML = `<span class="spinner"></span>本地 OCR 识别中…（首次会下载语言包，请稍候）`;
+    const text = await ocrImage(pendingFile.data, pendingFile.media_type);
+    if (!text.trim()) { $("processResult").innerHTML = `<div class="result-box err">未识别出文字，换张更清晰的图试试</div>`; return; }
+    applyResult(analyzeOffline(text));
   } catch (e) {
     $("processResult").innerHTML = `<div class="result-box err">❌ ${e.message || e}</div>`;
-  } finally { btn.disabled = false; syncEngineUI(); }
+  } finally { btn.disabled = false; btn.textContent = "📴 离线识别整理"; }
 };
 
 function applyResult(r) {
   // new tag (confirm with user)
   if (r.new_tag && !D.tags.find(t=>t.name===r.new_tag.name)) {
-    if (confirm(`Claude 建议新标签「${r.new_tag.name}」，添加吗？`)) {
+    if (confirm(`新标签「${r.new_tag.name}」，添加吗？`)) {
       D.tags.push({ name:r.new_tag.name, count:0, keywords:r.new_tag.keywords||[], lastUsed:null });
       if (!r.tags.includes(r.new_tag.name)) r.tags.push(r.new_tag.name);
     }
@@ -679,24 +568,6 @@ window._gcSpend = (id) => {
   save(); toast(msg);
 };
 
-/* ───────── tag advice ───────── */
-$("tagAdviceBtn").onclick = async () => {
-  if (!getKey()) { toast("请先设置 API Key"); return; }
-  $("tagAdvice").textContent = "分析中…";
-  try {
-    const c = client();
-    const resp = await c.messages.create({
-      model: MODEL, max_tokens: 2000, thinking: { type:"adaptive" },
-      messages: [{ role:"user", content:
-`这是我的文档管理标签使用情况（今天 ${todayStr()}）：
-${JSON.stringify(D.tags, null, 1)}
-最近文档摘要：${D.items.slice(0,20).map(i=>`[${i.tags.join(",")}] ${i.summary}`).join("；")}
-请给出标签整理建议（中文、要点式、≤6条）：哪些长期 count=0 可删；哪些常一起出现可合并/建父子关系；根据摘要内容给高频标签补充哪些 keywords。只输出建议本身。` }],
-    });
-    $("tagAdvice").textContent = resp.content.find(b=>b.type==="text")?.text || "";
-  } catch (e) { $("tagAdvice").textContent = "❌ " + e.message; }
-};
-
 /* ───────── reminders ───────── */
 async function checkReminders() {
   if (!D) return;
@@ -717,7 +588,6 @@ $("notifBtn").onclick = async () => {
 };
 
 /* ───────── settings ───────── */
-$("saveKeyBtn").onclick = () => { if (!D) return; D.apiKey = $("apiKeyInput").value.trim(); save(); toast("✅ 已保存（已加密）"); };
 $("exportBtn").onclick = () => {
   const blob = new Blob([JSON.stringify(D, null, 2)], { type:"application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
@@ -727,21 +597,18 @@ $("importBtn").onclick = () => $("importFile").click();
 $("importFile").onchange = async e => {
   try { const d = JSON.parse(await e.target.files[0].text());
     if (!d.tags) throw new Error("格式不对");
-    D = { ...freshData(), ...d, apiKey: (D && D.apiKey) || d.apiKey || "" }; save(); toast("✅ 导入成功");
+    D = { ...freshData(), ...d }; save(); toast("✅ 导入成功");
   } catch (err) { toast("导入失败: " + err.message); }
 };
 $("clearBtn").onclick = () => {
-  if (confirm("确定清空当前账号的全部数据？不可恢复。")) {
-    const k = D ? D.apiKey : ""; D = freshData(); D.apiKey = k; save(); toast("已清空");
-  }
+  if (confirm("确定清空当前账号的全部数据？不可恢复。")) { D = freshData(); save(); toast("已清空"); }
 };
 
 /* ───────── render ───────── */
 function renderAll() {
   if (!D) { $("hdrBadge").textContent = "未登录"; return; }
-  $("hdrBadge").textContent = `👤 ${currentUser} · ${getKey() ? "●" : "无 Key"}`;
+  $("hdrBadge").textContent = `👤 ${currentUser}`;
   $("acctName").textContent = currentUser;
-  $("apiKeyInput").value = getKey();
   // todos
   const sorted = [...D.todos].sort((a,b) => {
     if ((a.status==="done") !== (b.status==="done")) return a.status==="done" ? 1 : -1;
@@ -849,7 +716,7 @@ $("registerBtn").onclick = async () => {
     if (legacy && !Object.keys(accounts()).length) {
       try { const old = JSON.parse(legacy);
         if (old && old.tags && confirm("检测到这台设备上有账号系统之前的数据，并入这个新账号吗？")) {
-          initial = { ...freshData(), ...old, apiKey: localStorage.getItem("imgorg_apikey") || "" };
+          initial = { ...freshData(), ...old };
         }
       } catch {}
     }

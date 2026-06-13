@@ -10,16 +10,16 @@ The app is hosted at **https://papain.github.io/IMGOrg/** — works anywhere, no
 
 1. Open the URL in Chrome (Android) or Safari (iOS).
 2. Menu → **"安装应用 / Add to Home Screen"** — it becomes a full-screen app.
-3. **注册账号**（用户名 + 密码）。All data — API key included — is encrypted with AES-256 using a key derived from your password (PBKDF2). Without logging in, nothing can be decrypted; multiple accounts on one device are isolated from each other. ⚠️ Passwords cannot be recovered — losing it means losing the data.
-4. In ⚙️设置, paste your Claude API key (create one at [platform.claude.com](https://platform.claude.com)). Everything stays on your device — calls go directly to the Anthropic API, no middleman server.
-5. 📥处理 tab → take a photo / pick a screenshot / paste an image → Claude tags it, extracts everything, creates to-dos, checks FSA rules online, and tracks gift cards.
+3. **注册账号**（用户名 + 密码）。All data is encrypted with AES-256 using a key derived from your password (PBKDF2). Without logging in, nothing can be decrypted; multiple accounts on one device are isolated from each other. ⚠️ Passwords cannot be recovered — losing it means losing the data.
+4. 📥处理 tab → take a photo / pick a screenshot / paste an image → the app recognizes it **fully offline** and tags it, extracts amount/date, checks FSA eligibility, creates to-dos, and tracks gift cards.
 
-### Two recognition engines
+The PWA is **100% offline / no API key required** — recognition runs on-device (Tesseract.js OCR + a built-in rule engine). Nothing is sent to any server.
 
-- **📴 Offline (default, free, no internet):** on-device OCR (Tesseract.js, Chinese + English) reads the text, then a built-in rule engine tags it, extracts amount/date, and classifies **HCFSA eligibility** against a baked-in rule set (IRS Pub 502 + CARES Act 2020 — OTC meds ✅, menstrual care ✅, sunscreen SPF15+ ✅, vitamins ⚠️ LMN, toothpaste/gym ❌, etc.). Zero API cost, works on a plane. First run downloads ~15MB language packs, then cached.
-- **🤖 Claude AI (opt-in, needs key):** handles complex layouts, smart DCFSA service-date logic, and live web lookup for edge-case FSA rules.
+### Offline recognition engine
 
-Features: to-dos sorted nearest-due-first (overdue in red), DCFSA service-date logic with reminders, built-in/online HCFSA eligibility (✅/⚠️ LMN/❌), gift card auto-depletion + archiving, AI tag suggestions, JSON export/import for backup.
+On-device OCR (Tesseract.js, Chinese + English) reads the text, then a built-in rule engine tags it, extracts amount/date, and classifies **HCFSA eligibility** against a baked-in rule set (IRS Pub 502 + CARES Act 2020 — OTC meds ✅, menstrual care ✅, sunscreen SPF15+ ✅, vitamins ⚠️ LMN, toothpaste/gym ❌, etc.). Zero API cost, works on a plane. First run downloads ~15MB language packs, then cached for offline use.
+
+Features: to-dos sorted nearest-due-first (overdue in red), DCFSA reminders, built-in HCFSA eligibility (✅/⚠️ LMN/❌) viewable in Settings, gift card auto-depletion + archiving, JSON export/import for backup.
 
 ## 💻 Use with Claude Code (desktop power mode)
 
