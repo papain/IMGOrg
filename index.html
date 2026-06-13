@@ -80,8 +80,11 @@
   .gc .meta{font-size:11px;color:var(--muted);margin-top:4px}
   .gc .spend{display:flex;gap:6px;margin-top:8px}
   .gc .spend input{flex:1;padding:7px 10px;font-size:13px}
-  .tagstat{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:999px;padding:4px 11px;margin:0 5px 7px 0;font-size:12.5px;background:var(--card)}
+  .tagstat{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:999px;padding:4px 11px;margin:0 5px 7px 0;font-size:12.5px;background:var(--card);cursor:pointer}
   .tagstat .n{color:var(--muted);font-size:11px}
+  .tagstat.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tagstat.active .n{color:#fff;opacity:.8}
+  .logic-opt.active{background:var(--accent);color:#fff}
   .hint{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:8px}
   .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#222c;backdrop-filter:blur(6px);color:#fff;
          padding:10px 18px;border-radius:999px;font-size:13px;z-index:50;opacity:0;transition:opacity .3s;pointer-events:none;max-width:88%}
@@ -129,9 +132,16 @@
 
 <!-- ════════ 文档 ════════ -->
 <section class="view" id="view-items">
-  <div class="card"><h2>🏷️ 标签</h2><div id="tagStats"></div>
+  <div class="card"><h2>🏷️ 按标签筛选</h2>
+    <div id="tagStats"></div>
+    <div id="filterBar" style="display:none;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">多标签逻辑：</span>
+      <button class="btn-ghost btn-sm logic-opt active" data-logic="or">满足任一 (OR)</button>
+      <button class="btn-ghost btn-sm logic-opt" data-logic="and">同时满足 (AND)</button>
+      <button class="btn-ghost btn-sm" id="clearFilterBtn" style="color:var(--danger);background:var(--danger-soft)">清除筛选</button>
+    </div>
   </div>
-  <div class="card"><h2>🗂️ 文档</h2><div id="itemList"></div></div>
+  <div class="card"><h2>🗂️ 文档 <span id="itemCount" style="font-size:12px;color:var(--muted)"></span></h2><div id="itemList"></div></div>
 </section>
 
 <!-- ════════ 礼卡 ════════ -->
@@ -640,6 +650,19 @@ function toggleTodo(id) {
 }
 window._toggleTodo = toggleTodo;
 
+/* ───────── tag filter (文档页) ───────── */
+let filterTags = new Set(), filterLogic = "or";
+window._toggleFilter = name => {
+  filterTags.has(name) ? filterTags.delete(name) : filterTags.add(name);
+  renderAll();
+};
+document.querySelectorAll(".logic-opt").forEach(b => b.onclick = () => {
+  filterLogic = b.dataset.logic;
+  document.querySelectorAll(".logic-opt").forEach(x => x.classList.toggle("active", x.dataset.logic === filterLogic));
+  renderAll();
+});
+$("clearFilterBtn").onclick = () => { filterTags.clear(); renderAll(); };
+
 /* ───────── edit item (manual tags/summary) ───────── */
 let editingId = null, editSel = [];
 function openEdit(item) {
@@ -759,18 +782,32 @@ function renderAll() {
   }).join("") || `<div class="empty">🎉 没有待办</div>`;
   // nav badge
   document.querySelector('nav button[data-view="todos"]').style.color = sorted.some(t=>t.status!=="done"&&t.dueDate<=today) ? "var(--danger)" : "";
-  // items (click to edit tags/summary)
-  $("itemList").innerHTML = D.items.map(i => `
+  // items (filtered by selected tags; click to edit)
+  const shown = D.items.filter(i => {
+    if (!filterTags.size) return true;
+    const sel = [...filterTags];
+    return filterLogic === "and"
+      ? sel.every(t => (i.tags||[]).includes(t))
+      : sel.some(t => (i.tags||[]).includes(t));
+  });
+  $("itemCount").textContent = filterTags.size
+    ? `${shown.length}/${D.items.length} 篇 · ${[...filterTags].join(filterLogic==="and"?" 且 ":" 或 ")}`
+    : (D.items.length ? `${D.items.length} 篇` : "");
+  $("itemList").innerHTML = shown.map(i => `
     <div class="item" onclick="_editItem('${i.id}')" style="cursor:pointer">
       ${i.thumb ? `<img src="${i.thumb}">` : `<div class="ph">📄</div>`}
       <div style="flex:1">
         <div>${i.tags.map(x=>`<span class="tagchip">${x}</span>`).join("") || '<span class="tagchip" style="background:var(--warn-soft);color:var(--warn)">点此加标签</span>'}${i.summary}</div>
         <div class="meta">${i.date||""}${i.amount!=null?` · $${i.amount}`:""} · <span class="status-pill">${{active:"进行中",done:"✔完成",archived:"📦归档"}[i.status]}</span> · ✏️编辑</div>
         ${i.nextSteps && i.status==="active" ? `<div class="next">⏭ ${i.nextSteps}</div>` : ""}
-      </div></div>`).join("") || `<div class="empty">还没有文档，去 📥处理 页上传第一张</div>`;
-  // tags
+      </div></div>`).join("") ||
+      (D.items.length ? `<div class="empty">没有符合所选标签的文档</div>` : `<div class="empty">还没有文档，去 📥处理 页上传第一张</div>`);
+  // tags (clickable filter; only show tags in use, plus any currently selected)
   $("tagStats").innerHTML = [...D.tags].sort((a,b)=>b.count-a.count)
-    .map(t=>`<span class="tagstat"><b>${t.name}</b><span class="n">${t.count}</span></span>`).join("");
+    .filter(t => t.count > 0 || filterTags.has(t.name))
+    .map(t=>`<span class="tagstat ${filterTags.has(t.name)?'active':''}" onclick="_toggleFilter('${t.name.replace(/'/g,"\\'")}')"><b>${t.name}</b><span class="n">${t.count}</span></span>`).join("")
+    || `<div class="empty" style="text-align:left">还没有用过的标签</div>`;
+  $("filterBar").style.display = filterTags.size ? "flex" : "none";
   // gift cards
   const gcs = [...D.giftcards].sort((a,b)=>(a.status==="depleted")-(b.status==="depleted"));
   $("gcList").innerHTML = gcs.map(g => {
