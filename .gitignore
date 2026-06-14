@@ -12,6 +12,9 @@ data/data.local.js
 # Local Claude Code settings (machine-specific permissions)
 .claude/settings.local.json
 
+# Unrelated local project — not part of the receipt app
+SCORM/
+
 # OS noise
 Thumbs.db
 desktop.ini
