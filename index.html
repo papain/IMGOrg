@@ -114,8 +114,8 @@
 <section class="view active" id="view-process">
   <div class="dropzone" id="dropzone">
     <div style="font-size:30px">📸</div>
-    <div style="margin-top:6px">拍照 / 选择截图、收据或 PDF<br>也可以直接粘贴图片</div>
-    <input type="file" id="fileInput" accept="image/*,application/pdf" style="display:none">
+    <div style="margin-top:6px">拍照 / 选择截图、收据或 PDF<br>可一次选多张（同一系列）· 也可直接粘贴图片</div>
+    <input type="file" id="fileInput" accept="image/*,application/pdf" multiple style="display:none">
   </div>
   <div id="previewArea"></div>
   <button class="btn-primary" id="processBtn" style="display:none">📴 离线识别整理</button>
@@ -141,7 +141,9 @@
       <button class="btn-ghost btn-sm" id="clearFilterBtn" style="color:var(--danger);background:var(--danger-soft)">清除筛选</button>
     </div>
   </div>
-  <div class="card"><h2>🗂️ 文档 <span id="itemCount" style="font-size:12px;color:var(--muted)"></span></h2><div id="itemList"></div></div>
+  <div class="card"><h2>🗂️ 文档 <span id="itemCount" style="font-size:12px;color:var(--muted)"></span></h2>
+    <button class="btn-ghost btn-sm" id="purgeBtn" style="display:none;color:var(--danger);background:var(--danger-soft);margin-bottom:10px">🗑️ 清除所有标记「不需要」的文档 (<span id="purgeCount">0</span>)</button>
+    <div id="itemList"></div></div>
 </section>
 
 <!-- ════════ 礼卡 ════════ -->
@@ -202,6 +204,9 @@
 <!-- ════════ 看原图弹窗 ════════ -->
 <div id="imgOverlay" style="position:fixed;inset:0;background:#000d;z-index:95;display:none;align-items:center;justify-content:center;padding:12px" onclick="this.style.display='none'">
   <img id="imgFull" style="max-width:100%;max-height:92vh;border-radius:8px;object-fit:contain">
+  <button id="imgPrev" onclick="event.stopPropagation();_imgNav(-1)" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:#fff3;color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer">‹</button>
+  <button id="imgNext" onclick="event.stopPropagation();_imgNav(1)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:#fff3;color:#fff;border:none;border-radius:50%;width:44px;height:44px;font-size:22px;cursor:pointer">›</button>
+  <div id="imgCount" style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);color:#fff;background:#0008;border-radius:999px;padding:4px 12px;font-size:13px"></div>
 </div>
 
 <!-- ════════ 编辑文档弹窗 ════════ -->
@@ -220,8 +225,12 @@
     <input type="text" id="editDate" placeholder="YYYY-MM-DD">
     <label>金额（可留空）</label>
     <input type="number" id="editAmount" placeholder="金额">
+    <label style="margin-top:12px;display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="editNeedsReview" style="width:20px;height:20px;accent-color:var(--danger)">
+      <span style="color:var(--text)">🏷️ 标记为「不需要」（之后可在文档页一键批量删除）</span>
+    </label>
     <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn-ghost btn-sm" id="editDeleteBtn" style="color:var(--danger);background:var(--danger-soft)">删除</button>
+      <button class="btn-ghost btn-sm" id="editDeleteBtn" style="color:var(--danger);background:var(--danger-soft)">立即删除</button>
       <div style="flex:1"></div>
       <button class="btn-ghost btn-sm" id="editCancelBtn">取消</button>
       <button class="btn-primary" id="editSaveBtn" style="width:auto;padding:9px 20px">保存</button>
@@ -492,7 +501,7 @@ function analyzeOffline(rawText) {
 const addDays = (d, n) => { const dt = new Date(d + "T00:00:00"); dt.setDate(dt.getDate()+n); return dt.toLocaleDateString("sv"); };
 
 /* ───────── file handling ───────── */
-let pendingFile = null;   // {media_type, data(base64), isPdf, thumb}
+let pendingFiles = [];   // array of {media_type, data(base64), isPdf, thumb, original, name}
 
 async function fileToPending(file) {
   if (file.type === "application/pdf") {
@@ -527,46 +536,74 @@ const blobToImage = blob => new Promise((res,rej) => {
 });
 
 function showPending() {
-  $("previewArea").innerHTML = pendingFile
-    ? (pendingFile.isPdf
-       ? `<div class="card" style="text-align:center">📄 ${pendingFile.name}</div>`
-       : `<img class="preview-img" src="data:image/jpeg;base64,${pendingFile.data}">`)
+  const n = pendingFiles.length;
+  $("previewArea").innerHTML = n
+    ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">` +
+      pendingFiles.map((f,idx) => `
+        <div style="position:relative">
+          ${f.isPdf ? `<div class="ph" style="width:72px;height:72px;font-size:24px">📄</div>`
+                    : `<img src="data:image/jpeg;base64,${f.data}" style="width:72px;height:72px;object-fit:cover;border-radius:8px">`}
+          <span onclick="_removePending(${idx})" style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer">×</span>
+        </div>`).join("") +
+      `</div>${n>1 ? `<div class="hint" style="margin:0 0 6px">已选 ${n} 张 — 识别时会问你「合成一个文档」还是「各自独立」</div>` : ""}`
     : "";
-  $("processBtn").style.display = pendingFile ? "block" : "none";
+  $("processBtn").style.display = n ? "block" : "none";
+  $("processBtn").textContent = n > 1 ? `📴 识别整理 ${n} 张` : "📴 离线识别整理";
   $("processResult").innerHTML = "";
 }
-async function acceptFile(file) {
-  if (!file) return;
-  try { pendingFile = await fileToPending(file); showPending(); }
-  catch (e) { toast("读取文件失败: " + e.message); }
+window._removePending = idx => { pendingFiles.splice(idx,1); showPending(); };
+async function acceptFiles(files) {
+  const arr = [...files].filter(Boolean);
+  if (!arr.length) return;
+  try {
+    for (const f of arr) pendingFiles.push(await fileToPending(f));
+    showPending();
+  } catch (e) { toast("读取文件失败: " + e.message); }
 }
 $("dropzone").onclick = () => $("fileInput").click();
-$("fileInput").onchange = e => acceptFile(e.target.files[0]);
+$("fileInput").onchange = e => { acceptFiles(e.target.files); e.target.value = ""; };
 $("dropzone").ondragover = e => { e.preventDefault(); $("dropzone").classList.add("drag"); };
 $("dropzone").ondragleave = () => $("dropzone").classList.remove("drag");
-$("dropzone").ondrop = e => { e.preventDefault(); $("dropzone").classList.remove("drag"); acceptFile(e.dataTransfer.files[0]); };
+$("dropzone").ondrop = e => { e.preventDefault(); $("dropzone").classList.remove("drag"); acceptFiles(e.dataTransfer.files); };
 document.addEventListener("paste", e => {
-  const f = [...(e.clipboardData?.items||[])].find(i => i.type.startsWith("image/"));
-  if (f) acceptFile(f.getAsFile());
+  const imgs = [...(e.clipboardData?.items||[])].filter(i => i.type.startsWith("image/")).map(i => i.getAsFile());
+  if (imgs.length) acceptFiles(imgs);
 });
 
 /* ───────── process pipeline ───────── */
 $("processBtn").onclick = async () => {
-  if (!pendingFile) return;
-  const btn = $("processBtn");
+  if (!pendingFiles.length) return;
+  if (pendingFiles.some(f => f.isPdf)) { toast("离线模式暂不支持 PDF，请改用图片/截图"); return; }
+  const btn = $("processBtn"); const origLabel = btn.textContent;
   btn.disabled = true;
   try {
-    if (pendingFile.isPdf) { toast("离线模式暂不支持 PDF，请改用图片/截图"); return; }
-    btn.innerHTML = `<span class="spinner"></span>本地 OCR 识别中…（首次会下载语言包，请稍候）`;
-    const text = await ocrImage(pendingFile.data, pendingFile.media_type);
-    if (!text.trim()) { $("processResult").innerHTML = `<div class="result-box err">未识别出文字，换张更清晰的图试试</div>`; return; }
-    applyResult(analyzeOffline(text));
+    // multi-image: ask combine vs separate
+    let combine = true;
+    if (pendingFiles.length > 1) {
+      combine = confirm(`已选 ${pendingFiles.length} 张。\n\n确定 = 合成一个文档（同一系列，共享标签）\n取消 = 各自独立成 ${pendingFiles.length} 个文档`);
+    }
+    const imgs = pendingFiles.slice();   // snapshot
+    if (combine) {
+      btn.innerHTML = `<span class="spinner"></span>识别 ${imgs.length} 张并合并中…`;
+      let allText = "";
+      for (const f of imgs) allText += (await ocrImage(f.data, f.media_type)) + "\n";
+      if (!allText.trim()) { $("processResult").innerHTML = `<div class="result-box err">未识别出文字，换更清晰的图试试</div>`; return; }
+      applyResult(analyzeOffline(allText), imgs);
+    } else {
+      let done = 0;
+      for (const f of imgs) {
+        btn.innerHTML = `<span class="spinner"></span>识别第 ${++done}/${imgs.length} 张…`;
+        const text = await ocrImage(f.data, f.media_type);
+        applyResult(analyzeOffline(text || ""), [f], done < imgs.length);  // keep result box until last
+      }
+    }
   } catch (e) {
     $("processResult").innerHTML = `<div class="result-box err">❌ ${e.message || e}</div>`;
-  } finally { btn.disabled = false; btn.textContent = "📴 离线识别整理"; }
+  } finally { btn.disabled = false; pendingFiles = []; showPending(); }
 };
 
-function applyResult(r) {
+// images: array of {thumb, original}; appendMode keeps the result box for batch separate-mode
+function applyResult(r, images, silent) {
   // new tag (confirm with user)
   if (r.new_tag && !D.tags.find(t=>t.name===r.new_tag.name)) {
     if (confirm(`新标签「${r.new_tag.name}」，添加吗？`)) {
@@ -619,18 +656,21 @@ function applyResult(r) {
   }
   if (r.next_steps) lines.push(`⏭️ ${r.next_steps}`);
 
-  // item (keep the original full-size image as an in-app backup)
+  // item (keep ALL original full-size images as an in-app backup)
   const collectible = ["食谱","书","生活常识"].includes(r.category);
-  D.items.unshift({ id:itemId, thumb:pendingFile.thumb, original:pendingFile.original||null, tags:r.tags,
-    summary:r.summary, date:r.date||todayStr(),
-    amount:r.amount, status: collectible ? "archived" : "active", nextSteps:r.next_steps||"", createdAt:todayStr() });
+  const imgList = (images || []).map(f => ({ thumb:f.thumb, original:f.original||null }));
+  D.items.unshift({ id:itemId, thumb: imgList[0]?.thumb || null, original: imgList[0]?.original || null,
+    images: imgList, tags:r.tags, summary:r.summary, date:r.date||todayStr(),
+    amount:r.amount, status: collectible ? "archived" : "active", nextSteps:r.next_steps||"",
+    needsReview:false, createdAt:todayStr() });
   // tag stats
   for (const n of r.tags) { const t = D.tags.find(x=>x.name===n); if (t) { t.count++; t.lastUsed = todayStr(); } }
   D.processedCount = (D.processedCount||0) + 1;
   save();
-  if (pendingFile && pendingFile.original) lines.push("📷 原图已完整存入 App（文档页点缩略图看大图），可放心去相册删掉这张");
-  pendingFile = null; showPending();
-  $("processResult").innerHTML = `<div class="result-box">${lines.join("\n")}</div>`;
+  const nImg = imgList.filter(x=>x.original).length;
+  if (nImg) lines.push(`📷 ${nImg>1?nImg+" 张":""}原图已完整存入 App（文档页点缩略图看大图），可放心去相册删掉`);
+  if (!silent) $("processResult").innerHTML = `<div class="result-box">${lines.join("\n")}</div>`;
+  else $("processResult").innerHTML += `<div class="result-box" style="margin-top:8px">${lines.join("\n")}</div>`;
 }
 
 const findCard = name => {
@@ -683,6 +723,7 @@ function openEdit(item) {
   $("editSummary").value = item.summary || "";
   $("editDate").value = item.date || "";
   $("editAmount").value = item.amount != null ? item.amount : "";
+  $("editNeedsReview").checked = !!item.needsReview;
   renderEditTags();
   $("editOverlay").style.display = "flex";
 }
@@ -698,10 +739,24 @@ window._toggleEditTag = name => {
   renderEditTags();
 };
 window._editItem = id => { const it = D.items.find(i=>i.id===id); if (it) openEdit(it); };
+let viewImgs = [], viewIdx = 0;
 window._viewImg = id => {
-  const it = D.items.find(i=>i.id===id); if (!it || !it.original) return;
-  $("imgFull").src = it.original; $("imgOverlay").style.display = "flex";
+  const it = D.items.find(i=>i.id===id); if (!it) return;
+  // prefer images[] (multi); fall back to single original
+  viewImgs = (it.images && it.images.length ? it.images.map(x=>x.original) : [it.original]).filter(Boolean);
+  if (!viewImgs.length) return;
+  viewIdx = 0; renderViewImg();
+  $("imgOverlay").style.display = "flex";
 };
+function renderViewImg() {
+  $("imgFull").src = viewImgs[viewIdx];
+  const multi = viewImgs.length > 1;
+  $("imgPrev").style.display = multi ? "block" : "none";
+  $("imgNext").style.display = multi ? "block" : "none";
+  $("imgCount").style.display = multi ? "block" : "none";
+  $("imgCount").textContent = `${viewIdx+1} / ${viewImgs.length}`;
+}
+window._imgNav = d => { viewIdx = (viewIdx + d + viewImgs.length) % viewImgs.length; renderViewImg(); };
 $("editAddTagBtn").onclick = () => {
   const name = $("editNewTag").value.trim(); if (!name) return;
   if (!D.tags.find(t=>t.name===name)) D.tags.push({ name, count:0, keywords:[], lastUsed:null });
@@ -719,16 +774,29 @@ $("editSaveBtn").onclick = () => {
   it.date = $("editDate").value.trim() || it.date;
   const amt = parseFloat($("editAmount").value);
   it.amount = isNaN(amt) ? null : amt;
+  it.needsReview = $("editNeedsReview").checked;
   $("editOverlay").style.display = "none"; editingId = null;
-  save(); toast("✅ 已更新");
+  save(); toast(it.needsReview ? "已标记「不需要」" : "✅ 已更新");
 };
 $("editDeleteBtn").onclick = () => {
-  if (!editingId || !confirm("删除这个文档？关联的待办也会删除。")) return;
-  D.items = D.items.filter(i=>i.id!==editingId);
-  D.todos = D.todos.filter(t=>t.itemId!==editingId);
-  D.reminders = (D.reminders||[]).filter(r=>r.itemId!==editingId);
+  if (!editingId || !confirm("立即删除这个文档？关联的待办也会删除。")) return;
+  deleteItems([editingId]);
   $("editOverlay").style.display = "none"; editingId = null;
-  save(); toast("已删除");
+  toast("已删除");
+};
+function deleteItems(ids) {
+  const set = new Set(ids);
+  D.items = D.items.filter(i=>!set.has(i.id));
+  D.todos = D.todos.filter(t=>!set.has(t.itemId));
+  D.reminders = (D.reminders||[]).filter(r=>!set.has(r.itemId));
+  save();
+}
+$("purgeBtn").onclick = () => {
+  const flagged = D.items.filter(i=>i.needsReview);
+  if (!flagged.length) return;
+  if (!confirm(`确定删除 ${flagged.length} 个标记「不需要」的文档？不可恢复。`)) return;
+  deleteItems(flagged.map(i=>i.id));
+  toast(`已删除 ${flagged.length} 个文档`);
 };
 
 window._gcSpend = (id) => {
@@ -810,18 +878,24 @@ function renderAll() {
   $("itemCount").textContent = filterTags.size
     ? `${shown.length}/${D.items.length} 篇 · ${[...filterTags].join(filterLogic==="and"?" 且 ":" 或 ")}`
     : (D.items.length ? `${D.items.length} 篇` : "");
-  $("itemList").innerHTML = shown.map(i => `
-    <div class="item" onclick="_editItem('${i.id}')" style="cursor:pointer">
-      <div style="position:relative;flex-shrink:0" ${i.original?`onclick="event.stopPropagation();_viewImg('${i.id}')"`:''}>
+  $("itemList").innerHTML = shown.map(i => {
+    const nImg = (i.images && i.images.length) || (i.original ? 1 : 0);
+    return `
+    <div class="item" onclick="_editItem('${i.id}')" style="cursor:pointer;${i.needsReview?'opacity:.55;background:var(--danger-soft)':''}">
+      <div style="position:relative;flex-shrink:0" ${nImg?`onclick="event.stopPropagation();_viewImg('${i.id}')"`:''}>
         ${i.thumb ? `<img src="${i.thumb}">` : `<div class="ph">📄</div>`}
-        ${i.original?`<span style="position:absolute;right:-2px;bottom:-2px;background:#000a;color:#fff;border-radius:6px;font-size:10px;padding:0 4px">🔍</span>`:''}
+        ${nImg?`<span style="position:absolute;right:-2px;bottom:-2px;background:#000a;color:#fff;border-radius:6px;font-size:10px;padding:0 4px">${nImg>1?'🖼'+nImg:'🔍'}</span>`:''}
       </div>
       <div style="flex:1">
-        <div>${i.tags.map(x=>`<span class="tagchip">${x}</span>`).join("") || '<span class="tagchip" style="background:var(--warn-soft);color:var(--warn)">点此加标签</span>'}${i.summary}</div>
+        <div>${i.needsReview?'<span class="tagchip" style="background:var(--danger-soft);color:var(--danger)">🗑️不需要</span>':''}${i.tags.map(x=>`<span class="tagchip">${x}</span>`).join("") || '<span class="tagchip" style="background:var(--warn-soft);color:var(--warn)">点此加标签</span>'}${i.summary}</div>
         <div class="meta">${i.date||""}${i.amount!=null?` · $${i.amount}`:""} · <span class="status-pill">${{active:"进行中",done:"✔完成",archived:"📦归档"}[i.status]}</span> · ✏️编辑</div>
         ${i.nextSteps && i.status==="active" ? `<div class="next">⏭ ${i.nextSteps}</div>` : ""}
-      </div></div>`).join("") ||
+      </div></div>`; }).join("") ||
       (D.items.length ? `<div class="empty">没有符合所选标签的文档</div>` : `<div class="empty">还没有文档，去 📥处理 页上传第一张</div>`);
+  // purge button (shows count of flagged docs)
+  const flaggedCount = D.items.filter(i=>i.needsReview).length;
+  $("purgeBtn").style.display = flaggedCount ? "block" : "none";
+  $("purgeCount").textContent = flaggedCount;
   // tags (clickable filter; only show tags in use, plus any currently selected)
   $("tagStats").innerHTML = [...D.tags].sort((a,b)=>b.count-a.count)
     .filter(t => t.count > 0 || filterTags.has(t.name))

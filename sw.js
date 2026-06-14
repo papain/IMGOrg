@@ -1,4 +1,4 @@
-const CACHE = "imgorg-v9";
+const CACHE = "imgorg-v10";
 const SHELL = ["./", "index.html", "manifest.json", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", e => {
